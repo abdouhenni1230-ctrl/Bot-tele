@@ -27,7 +27,7 @@ function generateCode(length = 6) {
 
 // ---- استقبال /start ----
 bot.onText(/\/start/, msg => {
-    bot.sendMessage(msg.chat.id, "مرحبا 👋\nاضغط لشراء كود مقابل 5 نجوم ⭐", {
+    bot.sendMessage(msg.chat.id, "مرحبا 👋\nاضغط لشراء كود مقابل نجمة ⭐", {
         reply_markup: {
             inline_keyboard: [
                 [{ text: "شراء كود ⭐", callback_data: "buy" }]
@@ -39,7 +39,7 @@ bot.onText(/\/start/, msg => {
 // ---- زر الشراء ----
 bot.on("callback_query", query => {
     if (query.data === "buy") {
-        const prices = [{ label: "code", amount: 5 * 100 }]; // المبلغ بوحدات العملة الصغرى (سنت)
+        const prices = [{ label: "code", amount: 1 * 100 }]; // المبلغ بوحدات العملة الصغرى (سنت)
         
         bot.sendInvoice(
             query.message.chat.id,
