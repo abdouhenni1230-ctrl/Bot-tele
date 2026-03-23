@@ -20,7 +20,7 @@ bot.on("callback_query",query=>{
     
     if(query.data==="buy"){
         
-        const prices=[{label:"code",amount:5}];
+        const prices=[{label:"code",amount:1}];
 
         bot.sendInvoice(
             query.message.chat.id,
