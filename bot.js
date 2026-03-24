@@ -31,7 +31,7 @@ function generateCode(length=6){
 // start
 bot.onText(/\/start/,msg=>{
 
-    bot.sendMessage(msg.chat.id,"مرحبا 👋\nاضغط لشراء كود مقابل 5 نجوم ⭐",{
+    bot.sendMessage(msg.chat.id,"مرحبا 👋\nاضغط لشراء كود مقابل 1 نجمة ⭐",{
         reply_markup:{
             inline_keyboard:[
                 [{text:"شراء كود ⭐",callback_data:"buy"}]
@@ -77,24 +77,15 @@ bot.on("message",async(msg)=>{
 
  if(msg.successful_payment){
 
-     if(msg.successful_payment.currency === "XTR"){
+     const code = generateCode();
 
-         const code = generateCode();
+     await db.ref("codes/"+code).set(false);
 
-         await db.ref("codes/"+code).set({
-             used:false,
-             user:msg.from.id,
-             stars:msg.successful_payment.total_amount,
-             date:Date.now()
-         });
-
-         bot.sendMessage(
-             msg.chat.id,
-             "✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`"+code+"`",
-             {parse_mode:"Markdown"}
-         );
-
-     }
+     bot.sendMessage(
+         msg.chat.id,
+         "✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`"+code+"`",
+         {parse_mode:"Markdown"}
+     );
 
  }
 
