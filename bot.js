@@ -29,10 +29,7 @@ bot.on("callback_query",query=>{
             "payload",
             "stars",
             "XTR",
-            prices
-            {
-             start_parameter: 'payment'
-            }
+            price 
         );
     }
 
