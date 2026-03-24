@@ -47,7 +47,9 @@ bot.on("callback_query",query=>{
 
     if(query.data==="buy"){
 
-        const prices=[{label:"code",amount:5}];
+        bot.answerCallbackQuery(query.id);
+
+        const prices=[{label:"code",amount:1}];
 
         bot.sendInvoice(
             query.message.chat.id,
@@ -75,15 +77,25 @@ bot.on("message",async(msg)=>{
 
  if(msg.successful_payment){
 
-     const code = generateCode();
+     if(msg.successful_payment.currency === "XTR"){
 
-     await db.ref("codes/"+code).set({
-         used:false,
-         user:msg.from.id,
-         date:Date.now()
-     });
+         const code = generateCode();
 
-     bot.sendMessage(msg.chat.id,"✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`"+code+"`",{parse_mode:"Markdown"});
+         await db.ref("codes/"+code).set({
+             used:false,
+             user:msg.from.id,
+             stars:msg.successful_payment.total_amount,
+             date:Date.now()
+         });
+
+         bot.sendMessage(
+             msg.chat.id,
+             "✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`"+code+"`",
+             {parse_mode:"Markdown"}
+         );
+
+     }
+
  }
 
 });
