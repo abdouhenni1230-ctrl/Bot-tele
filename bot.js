@@ -27,7 +27,7 @@ bot.on("callback_query",query=>{
             "Buy Code",
             "Get access code",
             "payload",
-            "stars",
+            "",
             "XTR",
             prices
         );
