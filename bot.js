@@ -29,7 +29,7 @@ bot.on("callback_query",query=>{
             "payload",
             "stars",
             "XTR",
-            price 
+            prices
         );
     }
 
