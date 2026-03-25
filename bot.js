@@ -3,10 +3,9 @@ const admin = require("firebase-admin");
 const path = require("path");
 
 const token = process.env.BOT_TOKEN;
-
 const bot = new TelegramBot(token, { polling: true });
 
-// Firebase باستخدام ملف serviceAccountKey.json
+// Firebase
 const serviceAccount = require(path.join(__dirname, "serviceAccountKey.json"));
 
 admin.initializeApp({
@@ -65,21 +64,22 @@ bot.on("pre_checkout_query", (query) => {
   bot.answerPreCheckoutQuery(query.id, true);
 });
 
-// بعد الدفع
-bot.on("message", async (msg) => {
-  if (msg.successful_payment) {
-    const code = generateCode();
+// ✅ بعد الدفع: الحدث الصحيح
+bot.on("successful_payment", async (msg) => {
+  const chatId = msg.chat.id;
 
-    // حفظ الكود في Firebase
-    await db.ref("codes/" + code).set({
-      used: false,
-      created: Date.now()
-    });
+  const code = generateCode();
 
-    bot.sendMessage(
-      msg.chat.id,
-      "✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`" + code + "`",
-      { parse_mode: "Markdown" }
-    );
-  }
+  // حفظ الكود في Firebase
+  await db.ref("codes/" + code).set({
+    used: false,
+    created: Date.now()
+  });
+
+  // إرسال الكود للمستخدم
+  bot.sendMessage(
+    chatId,
+    "✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`" + code + "`",
+    { parse_mode: "Markdown" }
+  );
 });
