@@ -7,7 +7,7 @@ const bot = new TelegramBot(token,{polling:true});
 
 
 // Firebase
-const serviceAccount = require("./serviceAccountKey.json");
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -28,16 +28,20 @@ function generateCode(length=6){
 }
 
 
-// start
+// رسالة البداية
 bot.onText(/\/start/,msg=>{
 
-    bot.sendMessage(msg.chat.id,"مرحبا 👋\nاضغط لشراء كود مقابل 1 نجمة ⭐",{
-        reply_markup:{
-            inline_keyboard:[
-                [{text:"شراء كود ⭐",callback_data:"buy"}]
-            ]
+    bot.sendMessage(
+        msg.chat.id,
+        "مرحبا 👋\n\nاضغط الزر لشراء كود مقابل 1 نجمة ⭐",
+        {
+            reply_markup:{
+                inline_keyboard:[
+                    [{text:"شراء كود ⭐",callback_data:"buy"}]
+                ]
+            }
         }
-    });
+    );
 
 });
 
@@ -79,7 +83,7 @@ bot.on("message",async(msg)=>{
 
      const code = generateCode();
 
-     // تخزين الكود في Firebase
+     // حفظ الكود في Firebase
      await db.ref("codes/"+code).set({
         used:false,
         created:Date.now()
