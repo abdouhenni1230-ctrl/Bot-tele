@@ -1,20 +1,8 @@
 const TelegramBot = require("node-telegram-bot-api");
-const admin = require("firebase-admin");
 
 const token = process.env.BOT_TOKEN;
 
 const bot = new TelegramBot(token,{polling:true});
-
-
-// Firebase
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: "https://timetowork-2d513-default-rtdb.firebaseio.com"
-});
-
-const db = admin.database();
 
 
 // توليد كود عشوائي
@@ -73,13 +61,11 @@ bot.on("pre_checkout_query",(query)=>{
 
 
 // بعد الدفع
-bot.on("message",async(msg)=>{
+bot.on("message",(msg)=>{
 
  if(msg.successful_payment){
 
      const code = generateCode();
-
-     await db.ref("codes/"+code).set(false);
 
      bot.sendMessage(
          msg.chat.id,
