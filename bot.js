@@ -5,7 +5,7 @@ const path = require("path");
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// Firebase
+// Firebase باستخدام الملف مباشرة
 const serviceAccount = require(path.join(__dirname, "serviceAccountKey.json"));
 
 admin.initializeApp({
@@ -32,9 +32,7 @@ bot.onText(/\/start/, (msg) => {
     "مرحبا 👋\n\nاضغط الزر لشراء كود مقابل 1 نجمة ⭐",
     {
       reply_markup: {
-        inline_keyboard: [
-          [{ text: "شراء كود ⭐", callback_data: "buy" }]
-        ]
+        inline_keyboard: [[{ text: "شراء كود ⭐", callback_data: "buy" }]]
       }
     }
   );
@@ -64,22 +62,25 @@ bot.on("pre_checkout_query", (query) => {
   bot.answerPreCheckoutQuery(query.id, true);
 });
 
-// ✅ بعد الدفع: الحدث الصحيح
-bot.on("successful_payment", async (msg) => {
-  const chatId = msg.chat.id;
+// بعد الدفع: التقاط أي رسالة تحتوي على successful_payment
+bot.on("message", async (msg) => {
+  if (msg.successful_payment && msg.successful_payment.currency === "XTR") {
+    const chatId = msg.chat.id;
 
-  const code = generateCode();
+    const code = generateCode();
 
-  // حفظ الكود في Firebase
-  await db.ref("codes/" + code).set({
-    used: false,
-    created: Date.now()
-  });
+    // حفظ الكود في Firebase
+    await db.ref("codes/" + code).set({
+      used: false,
+      created: Date.now(),
+      user: msg.from.username || msg.from.id
+    });
 
-  // إرسال الكود للمستخدم
-  bot.sendMessage(
-    chatId,
-    "✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`" + code + "`",
-    { parse_mode: "Markdown" }
-  );
+    // إرسال الكود للمستخدم
+    bot.sendMessage(
+      chatId,
+      "✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`" + code + "`",
+      { parse_mode: "Markdown" }
+    );
+  }
 });
