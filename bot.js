@@ -7,7 +7,7 @@ const bot = new TelegramBot(token,{polling:true});
 
 
 // Firebase
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
