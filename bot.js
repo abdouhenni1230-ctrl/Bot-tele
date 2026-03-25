@@ -5,12 +5,18 @@ const path = require("path");
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-const serviceAccount = require(path.join(__dirname, "serviceAccountKey.json"));
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: "https://timetowork-2d513-default-rtdb.firebaseio.com"
-});
+try {
+  const serviceAccount = require(path.join(__dirname, "serviceAccountKey.json"));
+  
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: "https://timetowork-2d513-default-rtdb.firebaseio.com"
+  });
+  
+  console.log("✅ Firebase initialized successfully");
+} catch (error) {
+  console.error("❌ Firebase initialization error:", error);
+}
 
 const db = admin.database();
 
@@ -25,6 +31,7 @@ function generateCode(length = 6) {
 
 // /start
 bot.onText(/\/start/, (msg) => {
+  console.log("📢 User started bot:", msg.from.id);
   bot.sendMessage(msg.chat.id, "مرحبا 👋\nاضغط الزر لشراء كود مقابل 1 نجمة ⭐", {
     reply_markup: { inline_keyboard: [[{ text: "شراء كود ⭐", callback_data: "buy" }]] }
   });
@@ -32,6 +39,8 @@ bot.onText(/\/start/, (msg) => {
 
 // زر الشراء
 bot.on("callback_query", (query) => {
+  console.log("🛍️ User clicked buy button:", query.from.id);
+  
   if (query.data === "buy") {
     bot.answerCallbackQuery(query.id);
 
@@ -45,32 +54,67 @@ bot.on("callback_query", (query) => {
       "",
       "XTR",
       prices
-    );
+    ).catch(err => {
+      console.error("❌ Error sending invoice:", err);
+    });
   }
 });
 
-// التعامل مع الدفع فوراً عبر pre_checkout_query
-bot.on("pre_checkout_query", async (query) => {
-  try {
-    bot.answerPreCheckoutQuery(query.id, true);
+// ✅ معالج pre_checkout_query - الموافقة على الدفع
+bot.on("pre_checkout_query", (query) => {
+  console.log("💳 Pre-checkout query received:", query.id);
+  
+  bot.answerPreCheckoutQuery(query.id, true)
+    .then(() => {
+      console.log("✅ Pre-checkout approved");
+    })
+    .catch(err => {
+      console.error("❌ Error in pre-checkout:", err);
+      bot.answerPreCheckoutQuery(query.id, false, "حدث خطأ");
+    });
+});
 
-    // توليد الكود فوراً بعد التأكد من الدفع
+// ✅ معالج successful_payment - الحدث الرئيسي بعد الدفع الناجح
+bot.on("successful_payment", async (msg) => {
+  console.log("🎉 Payment successful for user:", msg.from.id);
+  
+  try {
+    // توليد الكود
     const code = generateCode();
+    console.log("🔑 Generated code:", code);
 
     // حفظ الكود في Firebase
     await db.ref("codes/" + code).set({
       used: false,
       created: Date.now(),
-      user: query.from.username || query.from.id
+      userId: msg.from.id,
+      username: msg.from.username || "N/A",
+      paymentId: msg.successful_payment.telegram_payment_charge_id
     });
+    
+    console.log("💾 Code saved to Firebase");
 
     // إرسال الكود للمستخدم
-    bot.sendMessage(
-      query.from.id,
-      "✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`" + code + "`",
+    await bot.sendMessage(
+      msg.from.id,
+      "✅ تم الدفع بنجاح!\n\n🔑 كودك الخاص:\n\n`" + code + "`",
       { parse_mode: "Markdown" }
     );
+    
+    console.log("📨 Code sent to user");
   } catch (err) {
-    console.error("خطأ أثناء توليد الكود:", err);
+    console.error("❌ Error handling successful payment:", err);
+    bot.sendMessage(
+      msg.from.id,
+      "❌ حدث خطأ في معالجة الدفع. يرجى التواصل مع الدعم.",
+      { parse_mode: "Markdown" }
+    );
   }
 });
+
+// معالج الأخطاء
+bot.on("polling_error", err => {
+  console.error("❌ Polling error:", err);
+});
+
+console.log("🤖 Bot is running...");
