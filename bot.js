@@ -5,7 +5,6 @@ const path = require("path");
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// Firebase باستخدام الملف مباشرة
 const serviceAccount = require(path.join(__dirname, "serviceAccountKey.json"));
 
 admin.initializeApp({
@@ -15,7 +14,6 @@ admin.initializeApp({
 
 const db = admin.database();
 
-// توليد كود عشوائي
 function generateCode(length = 6) {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let result = "";
@@ -27,15 +25,9 @@ function generateCode(length = 6) {
 
 // /start
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "مرحبا 👋\n\nاضغط الزر لشراء كود مقابل 1 نجمة ⭐",
-    {
-      reply_markup: {
-        inline_keyboard: [[{ text: "شراء كود ⭐", callback_data: "buy" }]]
-      }
-    }
-  );
+  bot.sendMessage(msg.chat.id, "مرحبا 👋\nاضغط الزر لشراء كود مقابل 1 نجمة ⭐", {
+    reply_markup: { inline_keyboard: [[{ text: "شراء كود ⭐", callback_data: "buy" }]] }
+  });
 });
 
 // زر الشراء
@@ -57,30 +49,28 @@ bot.on("callback_query", (query) => {
   }
 });
 
-// تأكيد الدفع
-bot.on("pre_checkout_query", (query) => {
-  bot.answerPreCheckoutQuery(query.id, true);
-});
+// التعامل مع الدفع فوراً عبر pre_checkout_query
+bot.on("pre_checkout_query", async (query) => {
+  try {
+    bot.answerPreCheckoutQuery(query.id, true);
 
-// بعد الدفع: التقاط أي رسالة تحتوي على successful_payment
-bot.on("message", async (msg) => {
-  if (msg.successful_payment && msg.successful_payment.currency === "XTR") {
-    const chatId = msg.chat.id;
-
+    // توليد الكود فوراً بعد التأكد من الدفع
     const code = generateCode();
 
     // حفظ الكود في Firebase
     await db.ref("codes/" + code).set({
       used: false,
       created: Date.now(),
-      user: msg.from.username || msg.from.id
+      user: query.from.username || query.from.id
     });
 
     // إرسال الكود للمستخدم
     bot.sendMessage(
-      chatId,
+      query.from.id,
       "✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`" + code + "`",
       { parse_mode: "Markdown" }
     );
+  } catch (err) {
+    console.error("خطأ أثناء توليد الكود:", err);
   }
 });
