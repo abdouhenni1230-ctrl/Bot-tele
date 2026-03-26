@@ -39,7 +39,7 @@ function generateCode(length = 6) {
 }
 
 // أمر /buy
-bot.onText(/\/start/, async (msg) => {
+bot.onText(//start/, async (msg) => {
   const chatId = msg.chat.id;
 
   try {
