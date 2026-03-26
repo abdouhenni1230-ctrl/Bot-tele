@@ -1,123 +1,70 @@
 const TelegramBot = require("node-telegram-bot-api");
 const admin = require("firebase-admin");
-const path = require("path");
+const fs = require("fs");
 
+// TOKEN
 const token = process.env.BOT_TOKEN;
 
 const bot = new TelegramBot(token, { polling: true });
 
-let db;
 
-// تشغيل Firebase
-try {
-
-const serviceAccount = require(path.join(__dirname,"serviceAccountKey.json"));
+// FIREBASE
+const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
-credential: admin.credential.cert(serviceAccount),
-databaseURL: "https://timetowork-2d513-default-rtdb.firebaseio.com"
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: "https://YOUR_PROJECT.firebaseio.com"
 });
 
-db = admin.database();
+const db = admin.database();
 
-} catch (err) {
-
-console.log("Firebase error",err);
-
-}
 
 // توليد كود
-function generateCode(length = 6){
+function generateCode(length = 10) {
 
-const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "";
 
-let result = "";
+  for (let i = 0; i < length; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
 
-for(let i=0;i<length;i++){
-
-result += chars.charAt(Math.floor(Math.random()*chars.length));
-
+  return code;
 }
 
-return result;
 
-}
+// أمر تجريبي للدفع
+bot.onText(/\/buy/, async (msg) => {
 
-// start
-bot.onText(/\/start/, (msg)=>{
+  const chatId = msg.chat.id;
 
-bot.sendMessage(msg.chat.id,
-"👋 مرحبا\nاضغط الزر لشراء كود مقابل ⭐1",
-{
-reply_markup:{
-inline_keyboard:[
-[{text:"شراء كود ⭐",callback_data:"buy"}]
-]
-}
-}
-);
+  try {
+
+    const code = generateCode();
+
+    await db.ref("codes/" + code).set({
+      used: false,
+      created: Date.now()
+    });
+
+    bot.sendMessage(chatId,
+`✅ تم إنشاء كودك بنجاح
+
+الكود الخاص بك:
+
+${code}
+
+احتفظ به جيداً 🔐`);
+
+  } catch (error) {
+
+    console.log("Firebase Error:", error);
+
+    bot.sendMessage(chatId,
+`❌ حدث خطأ أثناء إنشاء الكود
+
+${error.message}`);
+
+  }
 
 });
-
-// زر الشراء
-bot.on("callback_query",(query)=>{
-
-if(query.data === "buy"){
-
-bot.answerCallbackQuery(query.id);
-
-const prices = [{label:"code",amount:1}];
-
-bot.sendInvoice(
-query.message.chat.id,
-"شراء كود",
-"احصل على كود خاص",
-"code_payload",
-"",
-"XTR",
-prices
-);
-
-}
-
-});
-
-// الموافقة على الدفع
-bot.on("pre_checkout_query",(query)=>{
-
-bot.answerPreCheckoutQuery(query.id,true);
-
-});
-
-// التقاط الرسائل (ومنها الدفع)
-bot.on("message", async (msg)=>{
-
-if(!msg.successful_payment) return;
-
-try{
-
-const code = generateCode();
-
-await db.ref("codes/"+code).set({
-used:false,
-created:Date.now()
-});
-
-bot.sendMessage(
-msg.chat.id,
-"✅ تم الدفع بنجاح!\n\n🔑 كودك:\n\n`"+code+"`",
-{parse_mode:"Markdown"}
-);
-
-}catch(err){
-
-bot.sendMessage(
-msg.chat.id,
-"❌ خطأ أثناء التخزين\n\n"+err.message
-);
-
-}
-
-});
-
-console.log("Bot running...");
