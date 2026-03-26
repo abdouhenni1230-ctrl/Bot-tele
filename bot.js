@@ -6,7 +6,7 @@ const token = process.env.BOT_TOKEN;
 
 const bot = new TelegramBot(token, { polling: true });
 
-let db = null;
+let db;
 
 // تشغيل Firebase
 try {
@@ -20,9 +20,9 @@ databaseURL: "https://timetowork-2d513-default-rtdb.firebaseio.com"
 
 db = admin.database();
 
-} catch (e) {
+} catch (err) {
 
-console.log("Firebase error:",e);
+console.log("Firebase error",err);
 
 }
 
@@ -89,35 +89,23 @@ bot.answerPreCheckoutQuery(query.id,true);
 
 });
 
-// بعد الدفع
-bot.on("successful_payment",async (msg)=>{
+// التقاط الرسائل (ومنها الدفع)
+bot.on("message", async (msg)=>{
+
+if(!msg.successful_payment) return;
 
 try{
 
 const code = generateCode();
 
-if(!db){
-
-bot.sendMessage(msg.chat.id,
-"❌ خطأ: Firebase غير متصل"
-);
-
-return;
-
-}
-
-// حفظ الكود
 await db.ref("codes/"+code).set({
-
 used:false,
 created:Date.now()
-
 });
 
-// إرسال الكود
 bot.sendMessage(
 msg.chat.id,
-"✅ تم الدفع بنجاح!\n\n🔑 كودك الخاص:\n\n`"+code+"`",
+"✅ تم الدفع بنجاح!\n\n🔑 كودك:\n\n`"+code+"`",
 {parse_mode:"Markdown"}
 );
 
@@ -125,20 +113,10 @@ msg.chat.id,
 
 bot.sendMessage(
 msg.chat.id,
-"❌ حدث خطأ أثناء إنشاء الكود\n\n"+err.message
+"❌ خطأ أثناء التخزين\n\n"+err.message
 );
 
 }
-
-});
-
-// أخطاء polling
-bot.on("polling_error",(err)=>{
-
-bot.sendMessage(
-process.env.ADMIN_ID,
-"❌ polling error\n"+err.message
-);
 
 });
 
