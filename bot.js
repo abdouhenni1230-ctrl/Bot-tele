@@ -22,7 +22,7 @@ db = admin.database();
 
 }catch(err){
 
-console.log("Firebase init error:",err);
+console.log(err);
 
 }
 
@@ -43,7 +43,6 @@ return result;
 
 }
 
-
 // start
 bot.onText(/\/start/, (msg)=>{
 
@@ -60,8 +59,7 @@ inline_keyboard:[
 
 });
 
-
-// زر الشراء (الدفع كما هو)
+// زر الشراء
 bot.on("callback_query",(query)=>{
 
 if(query.data === "buy"){
@@ -84,7 +82,6 @@ prices
 
 });
 
-
 // الموافقة على الدفع
 bot.on("pre_checkout_query",(query)=>{
 
@@ -92,8 +89,7 @@ bot.answerPreCheckoutQuery(query.id,true);
 
 });
 
-
-// بعد الدفع (كما كان)
+// بعد الدفع
 bot.on("message", async (msg)=>{
 
 if(!msg.successful_payment) return;
@@ -102,11 +98,13 @@ try{
 
 const code = generateCode();
 
+// تخزين في Firebase
 await db.ref("codes/"+code).set({
 used:false,
 created:Date.now()
 });
 
+// إرسال الكود
 bot.sendMessage(
 msg.chat.id,
 "✅ تم الدفع بنجاح\n\n🔑 كودك:\n\n`"+code+"`",
@@ -115,46 +113,17 @@ msg.chat.id,
 
 }catch(err){
 
+// إرسال الخطأ للمستخدم
 bot.sendMessage(
 msg.chat.id,
-"❌ خطأ أثناء حفظ الكود:\n\n"+err.message
+"❌ حدث خطأ أثناء إنشاء الكود:\n\n"+err.message
 );
 
 }
 
 });
 
-
-// أمر الاختبار /buy
-bot.onText(/\/buy/, async (msg)=>{
-
-try{
-
-const code = generateCode();
-
-await db.ref("codes/"+code).set({
-used:false,
-created:Date.now()
-});
-
-bot.sendMessage(
-msg.chat.id,
-"🧪 اختبار Firebase\n\nتم إنشاء الكود:\n\n`"+code+"`",
-{parse_mode:"Markdown"}
-);
-
-}catch(err){
-
-bot.sendMessage(
-msg.chat.id,
-"❌ Firebase Error:\n\n"+err.message
-);
-
-}
-
-});
-
-
+// أخطاء polling
 bot.on("polling_error",(err)=>{
 
 console.log(err);
