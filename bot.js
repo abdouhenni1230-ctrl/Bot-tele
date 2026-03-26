@@ -38,8 +38,8 @@ function generateCode(length = 6) {
   return result;
 }
 
-// أمر /buy
-bot.onText(//start/, async (msg) => {
+// أمر /start: يولد الكود مباشرة
+bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
 
   try {
@@ -53,7 +53,7 @@ bot.onText(//start/, async (msg) => {
 
     bot.sendMessage(
       chatId,
-      `🧪 تم إنشاء الكود بنجاح:\n\n\`${code}\``,
+      `👋 مرحبا!\n\n✅ تم إنشاء كودك بنجاح:\n\n\`${code}\``,
       { parse_mode: "Markdown" }
     );
 
