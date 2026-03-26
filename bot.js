@@ -5,21 +5,20 @@ const path = require("path");
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
+// ---- إعداد Firebase ----
 try {
   const serviceAccount = require(path.join(__dirname, "serviceAccountKey.json"));
-  
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
     databaseURL: "https://timetowork-2d513-default-rtdb.firebaseio.com"
   });
-  
-  console.log("✅ Firebase initialized successfully");
 } catch (error) {
-  console.error("❌ Firebase initialization error:", error);
+  console.error("Firebase initialization error:", error);
 }
 
 const db = admin.database();
 
+// توليد الكود
 function generateCode(length = 6) {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let result = "";
@@ -31,7 +30,6 @@ function generateCode(length = 6) {
 
 // /start
 bot.onText(/\/start/, (msg) => {
-  console.log("📢 User started bot:", msg.from.id);
   bot.sendMessage(msg.chat.id, "مرحبا 👋\nاضغط الزر لشراء كود مقابل 1 نجمة ⭐", {
     reply_markup: { inline_keyboard: [[{ text: "شراء كود ⭐", callback_data: "buy" }]] }
   });
@@ -39,8 +37,6 @@ bot.onText(/\/start/, (msg) => {
 
 // زر الشراء
 bot.on("callback_query", (query) => {
-  console.log("🛍️ User clicked buy button:", query.from.id);
-  
   if (query.data === "buy") {
     bot.answerCallbackQuery(query.id);
 
@@ -51,70 +47,57 @@ bot.on("callback_query", (query) => {
       "شراء كود",
       "احصل على كود خاص",
       "code_payload",
-      "",
+      "", // لا نحتاج provider_token
       "XTR",
       prices
     ).catch(err => {
-      console.error("❌ Error sending invoice:", err);
+      bot.sendMessage(query.from.id, `❌ خطأ عند إرسال الفاتورة:\n${err.message || err}`);
     });
   }
 });
 
-// ✅ معالج pre_checkout_query - الموافقة على الدفع
+// الموافقة على pre_checkout_query
 bot.on("pre_checkout_query", (query) => {
-  console.log("💳 Pre-checkout query received:", query.id);
-  
-  bot.answerPreCheckoutQuery(query.id, true)
-    .then(() => {
-      console.log("✅ Pre-checkout approved");
-    })
-    .catch(err => {
-      console.error("❌ Error in pre-checkout:", err);
-      bot.answerPreCheckoutQuery(query.id, false, "حدث خطأ");
-    });
+  bot.answerPreCheckoutQuery(query.id, true).catch(err => {
+    bot.sendMessage(query.from.id, `❌ خطأ في الموافقة على الدفع:\n${err.message || err}`);
+  });
 });
 
-// ✅ معالج successful_payment - الحدث الرئيسي بعد الدفع الناجح
+// معالجة successful_payment
 bot.on("successful_payment", async (msg) => {
-  console.log("🎉 Payment successful for user:", msg.from.id);
-  
+  let code = generateCode();
+  let saved = false;
+
   try {
-    // توليد الكود
-    const code = generateCode();
-    console.log("🔑 Generated code:", code);
+    // محاولة حفظ الكود في Firebase
+    try {
+      await db.ref("codes/" + code).set({
+        used: false,
+        created: Date.now(),
+        userId: msg.from.id,
+        username: msg.from.username || "N/A",
+        paymentId: msg.successful_payment.telegram_payment_charge_id
+      });
+      saved = true;
+    } catch (fbErr) {
+      bot.sendMessage(msg.chat.id, `⚠️ تم الدفع لكن حدث خطأ عند حفظ الكود في Firebase:\n${fbErr.message || fbErr}`);
+    }
 
-    // حفظ الكود في Firebase
-    await db.ref("codes/" + code).set({
-      used: false,
-      created: Date.now(),
-      userId: msg.from.id,
-      username: msg.from.username || "N/A",
-      paymentId: msg.successful_payment.telegram_payment_charge_id
-    });
-    
-    console.log("💾 Code saved to Firebase");
-
-    // إرسال الكود للمستخدم
+    // إرسال الكود للمستخدم دائمًا
     await bot.sendMessage(
-      msg.from.id,
-      "✅ تم الدفع بنجاح!\n\n🔑 كودك الخاص:\n\n`" + code + "`",
+      msg.chat.id,
+      `✅ تم الدفع بنجاح!\n\n🔑 كودك الخاص:\n\`${code}\`\n${saved ? "تم تخزينه في قاعدة البيانات." : "لم يتم تخزينه في Firebase."}`,
       { parse_mode: "Markdown" }
     );
-    
-    console.log("📨 Code sent to user");
   } catch (err) {
-    console.error("❌ Error handling successful payment:", err);
     bot.sendMessage(
-      msg.from.id,
-      "❌ حدث خطأ في معالجة الدفع. يرجى التواصل مع الدعم.",
-      { parse_mode: "Markdown" }
+      msg.chat.id,
+      `❌ حدث خطأ غير متوقع أثناء معالجة الدفع:\n${err.message || err}`
     );
   }
 });
 
-// معالج الأخطاء
-bot.on("polling_error", err => {
-  console.error("❌ Polling error:", err);
+// التقاط أي خطأ أثناء polling
+bot.on("polling_error", (err) => {
+  console.error("Polling error:", err);
 });
-
-console.log("🤖 Bot is running...");
