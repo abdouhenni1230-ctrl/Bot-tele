@@ -1,23 +1,25 @@
 name: Run Telegram Bot
 
 on:
-  schedule:
-    
   workflow_dispatch:
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Download code
+      uses: actions/checkout@v3
 
-    - uses: actions/setup-node@v3
+    - name: Install Node
+      uses: actions/setup-node@v3
       with:
         node-version: 18
 
-    - run: npm install
+    - name: Install packages
+      run: npm install
 
-    - run: node bot.js
+    - name: Run bot
+      run: node bot.js
       env:
         BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
