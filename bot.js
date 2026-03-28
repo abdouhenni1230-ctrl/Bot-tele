@@ -1,4 +1,5 @@
-const TelegramBot = require("node-telegram-bot-api");
+
+il.ill'const TelegramBot = require("node-telegram-bot-api");
 const admin = require("firebase-admin");
 
 const token = process.env.BOT_TOKEN;
