@@ -1,6 +1,5 @@
 const TelegramBot = require("node-telegram-bot-api");
 const https = require("https");
-const fs = require("fs");
 
 // الحصول على التوكن من متغيرات البيئة
 const token = process.env.BOT_TOKEN;
@@ -13,17 +12,17 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 
-// دالة لتوليد الكود
-function generateCode() {
+// دالة لتوليد الكود العشوائي (8 خانات كما في طلبك الأصلي)
+function generateCode(length = 8) {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let code = "";
-    for (let i = 0; i < 8; i++) {
-        code += chars[Math.floor(Math.random() * chars.length)];
+    let result = "";
+    for (let i = 0; i < length; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    return code;
+    return result;
 }
 
-// دالة لحفظ البيانات عبر REST API (تجنب تعليق SDK)
+// دالة لحفظ البيانات في Firebase عبر REST API (تجنب تعليق SDK)
 function saveToFirebaseREST(path, data) {
     return new Promise((resolve, reject) => {
         const url = new URL(`${databaseURL}${path}.json`);
@@ -58,34 +57,71 @@ function saveToFirebaseREST(path, data) {
     });
 }
 
-bot.onText(/\/start/, async (msg) => {
-    const chatId = msg.chat.id;
-
-    try {
-        await bot.sendMessage(chatId, "🚀 تم استقبال الأمر /start");
-
-        const code = generateCode();
-        await bot.sendMessage(chatId, "🔢 تم توليد الكود:\n`" + code + "`", { parse_mode: "Markdown" });
-
-        await bot.sendMessage(chatId, "⏳ جارِ محاولة التخزين (عبر REST API)...");
-
-        // محاولة التخزين
-        await saveToFirebaseREST(`codes/${code}`, {
-            code: code,
-            used: false,
-            created: Date.now()
-        });
-
-        await bot.sendMessage(chatId, "✅ تم تخزين الكود بنجاح!");
-
-    } catch (e) {
-        console.error("❌ Error:", e.message);
-        let errorMsg = e.message;
-        if (errorMsg.includes("401") || errorMsg.includes("403")) {
-            errorMsg = "خطأ في الصلاحيات (Permission Denied). تأكد من إعدادات Rules في Firebase لتسمح بالكتابة العامة مؤقتاً للتجربة.";
+// الأمر /start
+bot.onText(/\/start/, (msg) => {
+    bot.sendMessage(msg.chat.id, "مرحبا 👋\nاضغط لشراء كود مقابل 1 نجمة ⭐", {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: "شراء كود ⭐", callback_data: "buy" }]
+            ]
         }
-        await bot.sendMessage(chatId, "❌ فشل التخزين:\n" + errorMsg);
+    });
+});
+
+// التعامل مع زر الشراء
+bot.on("callback_query", (query) => {
+    if (query.data === "buy") {
+        bot.answerCallbackQuery(query.id);
+
+        const prices = [{ label: "كود خاص", amount: 1 }]; // السعر 1 نجمة
+
+        bot.sendInvoice(
+            query.message.chat.id,
+            "شراء كود",
+            "احصل على كود فريد سيتم تخزينه في قاعدة البيانات",
+            "code_payload",
+            "", // provider_token يبقى فارغاً عند استخدام النجوم (XTR)
+            "XTR",
+            prices
+        );
     }
 });
 
-console.log("🤖 Bot is running with REST API mode...");
+// تأكيد عملية الدفع (Pre-checkout)
+bot.on("pre_checkout_query", (query) => {
+    bot.answerPreCheckoutQuery(query.id, true);
+});
+
+// التعامل مع الرسائل بعد نجاح الدفع
+bot.on("message", async (msg) => {
+    if (msg.successful_payment) {
+        const chatId = msg.chat.id;
+        const code = generateCode();
+
+        try {
+            await bot.sendMessage(chatId, "✅ تم الدفع بنجاح! جارٍ إنشاء الكود وتخزينه...");
+
+            // تخزين الكود في Firebase
+            await saveToFirebaseREST(`codes/${code}`, {
+                code: code,
+                used: false,
+                buyer_id: chatId,
+                buyer_username: msg.from.username || "Unknown",
+                created: Date.now()
+            });
+
+            // إرسال الكود للمستخدم بعد نجاح التخزين
+            await bot.sendMessage(
+                chatId,
+                "🔑 كودك الخاص هو:\n\n`" + code + "`\n\n✅ تم حفظ الكود في قاعدة البيانات بنجاح.",
+                { parse_mode: "Markdown" }
+            );
+
+        } catch (e) {
+            console.error("❌ Firebase Error:", e.message);
+            await bot.sendMessage(chatId, "⚠️ تم الدفع بنجاح ولكن حدث خطأ أثناء التخزين:\n" + e.message + "\n\nيرجى التواصل مع الإدارة مع الكود: `" + code + "`", { parse_mode: "Markdown" });
+        }
+    }
+});
+
+console.log("🤖 Bot with Stars Payment & Firebase REST is running...");
