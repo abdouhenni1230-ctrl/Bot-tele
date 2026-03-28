@@ -1,115 +1,96 @@
 const TelegramBot = require("node-telegram-bot-api");
 const admin = require("firebase-admin");
-const path = require("path");
-const fs = require("fs");
 
 const token = process.env.BOT_TOKEN;
 
 const bot = new TelegramBot(token, { polling: true });
 
-let db = null;
-let firebaseError = null;
+// تحميل firebase
+let serviceAccount;
+try{
+serviceAccount = require("./serviceAccountKey.json");
+}catch(e){
+bot.sendMessage(0,"خطأ في قراءة serviceAccountKey.json");
+}
 
-// محاولة تشغيل Firebase
-try {
-
-const serviceAccountPath = path.join(__dirname,"serviceAccountKey.json");
-const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath,"utf8"));
+// تشغيل firebase
+try{
 
 admin.initializeApp({
 credential: admin.credential.cert(serviceAccount),
-databaseURL: "https://timetowork-2d513-default-rtdb.firebaseio.com"
+databaseURL: "https://timetowork-2d513-default-rtdb.firebaseio.com/"
 });
 
-db = admin.database();
+}catch(e){
+}
 
-}catch(err){
+const db = admin.database();
 
-firebaseError = err.message;
+function generateCode(){
+
+const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+let code="";
+
+for(let i=0;i<8;i++){
+
+code += chars[Math.floor(Math.random()*chars.length)];
 
 }
 
-
-// توليد كود
-function generateCode(length=6){
-
-const chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-let result="";
-
-for(let i=0;i<length;i++){
-result+=chars.charAt(Math.floor(Math.random()*chars.length));
-}
-
-return result;
+return code;
 
 }
 
-
-
-// عند ارسال /start
 bot.onText(/\/start/, async (msg)=>{
 
 const chatId = msg.chat.id;
 
+try{
 
-// المرحلة 1
-await bot.sendMessage(chatId,"1️⃣ تم استقبال الأمر /start");
+await bot.sendMessage(chatId,"تم استقبال الامر /start");
 
+}catch(e){}
 
-// المرحلة 2: توليد الكود
 let code;
 
 try{
 
 code = generateCode();
 
-await bot.sendMessage(chatId,"2️⃣ تم إنشاء الكود:\n"+code);
+await bot.sendMessage(chatId,"تم توليد الكود:\n"+code);
 
-}catch(err){
+}catch(e){
 
-await bot.sendMessage(chatId,"❌ خطأ أثناء إنشاء الكود:\n"+err.message);
+bot.sendMessage(chatId,"مشكلة في توليد الكود");
+
 return;
 
 }
 
+try{
 
-// المرحلة 3: التحقق من Firebase
-if(firebaseError){
+await bot.sendMessage(chatId,"جار الاتصال بقاعدة البيانات...");
 
-await bot.sendMessage(
-chatId,
-"❌ Firebase لم يعمل:\n"+firebaseError
-);
+}catch(e){}
 
-return;
-
-}else{
-
-await bot.sendMessage(chatId,"3️⃣ Firebase يعمل");
-
-}
-
-
-// المرحلة 4: حفظ الكود
 try{
 
 await db.ref("codes/"+code).set({
+code:code,
 used:false,
 created:Date.now()
 });
 
-await bot.sendMessage(
-chatId,
-"4️⃣ تم حفظ الكود في قاعدة البيانات بنجاح ✅"
-);
+await bot.sendMessage(chatId,"✅ تم تخزين الكود في Firebase");
 
-}catch(err){
+}catch(e){
 
-await bot.sendMessage(
-chatId,
-"❌ حدث خطأ أثناء حفظ الكود:\n"+err.message
-);
+await bot.sendMessage(chatId,"❌ فشل تخزين الكود\n"+e.message);
 
 }
 
 });
+
+// منع توقف السكربت
+setInterval(()=>{},1000);
