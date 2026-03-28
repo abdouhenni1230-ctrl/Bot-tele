@@ -1,135 +1,62 @@
-const TelegramBot = require("node-telegram-bot-api");
-const admin = require("firebase-admin");
-const path = require("path");
-const fs = require("fs");
+const TelegramBot = require('node-telegram-bot-api');
+const admin = require('firebase-admin');
 
+// توكن البوت من GitHub Secrets
 const token = process.env.BOT_TOKEN;
+
+// رابط قاعدة البيانات (مباشر في الكود)
+const databaseURL = "https://timetowork-2d513-default-rtdb.firebaseio.com/";
 
 const bot = new TelegramBot(token, { polling: true });
 
-let db = null;
-let firebaseError = null;
-
-// محاولة تشغيل Firebase
-try {
-
-const serviceAccountPath = path.join(__dirname,"serviceAccountKey.json");
-const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath,"utf8"));
+// تشغيل Firebase
+const serviceAccount = require('./serviceAccountKey.json');
 
 admin.initializeApp({
-credential: admin.credential.cert(serviceAccount),
-databaseURL: "https://timetowork-2d513-default-rtdb.firebaseio.com"
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: databaseURL
 });
 
-db = admin.database();
+// توليد كود عشوائي
+function generateCode() {
 
-}catch(err){
+const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+let code = "";
 
-firebaseError = err.message;
+for (let i = 0; i < 8; i++) {
+code += chars.charAt(Math.floor(Math.random() * chars.length));
+}
+
+return code;
 
 }
 
-
-// توليد كود
-function generateCode(length=6){
-
-const chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-let result="";
-
-for(let i=0;i<length;i++){
-result+=chars.charAt(Math.floor(Math.random()*chars.length));
-}
-
-return result;
-
-}
-
-
-
-// عند ارسال /start
-bot.onText(/\/start/, async (msg)=>{
+// امر start
+bot.onText(/\/start/, async (msg) => {
 
 const chatId = msg.chat.id;
 
+try {
 
-// المرحلة 1
-await bot.sendMessage(chatId,"1️⃣ تم استقبال الأمر /start");
+const code = generateCode();
 
-
-// المرحلة 2: توليد الكود
-let code;
-
-try{
-
-code = generateCode();
-
-await bot.sendMessage(chatId,"2️⃣ تم إنشاء الكود:\n"+code);
-
-}catch(err){
-
-await bot.sendMessage(chatId,"❌ خطأ أثناء إنشاء الكود:\n"+err.message);
-return;
-
-}
-
-
-// المرحلة 3: التحقق من Firebase
-if(firebaseError){
-
-await bot.sendMessage(
-chatId,
-"❌ Firebase لم يعمل:\n"+firebaseError
-);
-
-return;
-
-}else{
-
-await bot.sendMessage(chatId,"3️⃣ Firebase يعمل");
-
-}
-
-
-// المرحلة 4: حفظ الكود
-try{
-
-const ref = db.ref("codes/"+code);
-
-await bot.sendMessage(chatId,"4️⃣ محاولة حفظ الكود...");
-
-await ref.set({
-used:false,
-created:Date.now()
+await admin.database().ref("codes/" + code).set({
+code: code,
+user: chatId,
+time: Date.now()
 });
 
-await bot.sendMessage(chatId,"5️⃣ تم إرسال أمر الحفظ إلى Firebase");
-
-
-// قراءة الكود بعد الحفظ
-const snapshot = await ref.once("value");
-
-if(snapshot.exists()){
-
-await bot.sendMessage(
-chatId,
-"6️⃣ تم العثور على الكود داخل Firebase:\n"+
-JSON.stringify(snapshot.val(),null,2)
+bot.sendMessage(chatId,
+"✅ تم إنشاء كود جديد\n\n" +
+"🔑 الكود:\n" +
+code
 );
 
-}else{
+} catch (err) {
 
-await bot.sendMessage(
-chatId,
-"❌ Firebase لم يعثر على الكود بعد الحفظ"
-);
-
-}
-
-}catch(err){
-
-await bot.sendMessage(
-chatId,
-"❌ خطأ أثناء حفظ الكود:\n"+err.message
+bot.sendMessage(chatId,
+"❌ حدث خطأ أثناء إنشاء الكود\n\n" +
+err.message
 );
 
 }
