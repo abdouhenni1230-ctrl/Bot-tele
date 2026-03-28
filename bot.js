@@ -93,21 +93,43 @@ await bot.sendMessage(chatId,"3️⃣ Firebase يعمل");
 // المرحلة 4: حفظ الكود
 try{
 
-await db.ref("codes/"+code).set({
+const ref = db.ref("codes/"+code);
+
+await bot.sendMessage(chatId,"4️⃣ محاولة حفظ الكود...");
+
+await ref.set({
 used:false,
 created:Date.now()
 });
 
+await bot.sendMessage(chatId,"5️⃣ تم إرسال أمر الحفظ إلى Firebase");
+
+
+// قراءة الكود بعد الحفظ
+const snapshot = await ref.once("value");
+
+if(snapshot.exists()){
+
 await bot.sendMessage(
 chatId,
-"4️⃣ تم حفظ الكود في قاعدة البيانات بنجاح ✅"
+"6️⃣ تم العثور على الكود داخل Firebase:\n"+
+JSON.stringify(snapshot.val(),null,2)
 );
+
+}else{
+
+await bot.sendMessage(
+chatId,
+"❌ Firebase لم يعثر على الكود بعد الحفظ"
+);
+
+}
 
 }catch(err){
 
 await bot.sendMessage(
 chatId,
-"❌ حدث خطأ أثناء حفظ الكود:\n"+err.message
+"❌ خطأ أثناء حفظ الكود:\n"+err.message
 );
 
 }
