@@ -12,6 +12,13 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 
+// Voucher types and prices (Stars)
+const VOUCHERS = {
+    silver: { name: "Silver Voucher", price: 1, color: "🥈" },
+    gold: { name: "Gold Voucher", price: 2, color: "🥇" },
+    diamond: { name: "Diamond Voucher", price: 5, color: "💎" }
+};
+
 // Generate random code (8 characters)
 function generateCode(length = 8) {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -22,36 +29,25 @@ function generateCode(length = 8) {
     return result;
 }
 
-// Save data to Firebase via REST API (Prevents SDK hanging)
+// Save data to Firebase via REST API
 function saveToFirebaseREST(path, data) {
     return new Promise((resolve, reject) => {
         const url = new URL(`${databaseURL}${path}.json`);
         const options = {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            timeout: 10000 // 10 seconds timeout
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 10000
         };
-
         const req = https.request(url, options, (res) => {
             let body = '';
             res.on('data', (chunk) => body += chunk);
             res.on('end', () => {
-                if (res.statusCode >= 200 && res.statusCode < 300) {
-                    resolve(JSON.parse(body));
-                } else {
-                    reject(new Error(`Firebase REST Error: ${res.statusCode} - ${body}`));
-                }
+                if (res.statusCode >= 200 && res.statusCode < 300) resolve(JSON.parse(body));
+                else reject(new Error(`Firebase REST Error: ${res.statusCode}`));
             });
         });
-
         req.on('error', (e) => reject(e));
-        req.on('timeout', () => {
-            req.destroy();
-            reject(new Error("Firebase Request Timeout (REST)"));
-        });
-        
+        req.on('timeout', () => { req.destroy(); reject(new Error("Timeout")); });
         req.write(JSON.stringify(data));
         req.end();
     });
@@ -59,30 +55,36 @@ function saveToFirebaseREST(path, data) {
 
 // /start command
 bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id, "Hello 👋\nClick to buy a code for 1 Star ⭐", {
+    bot.sendMessage(msg.chat.id, "Hello 👋\nPlease choose the type of voucher you want to buy:", {
         reply_markup: {
             inline_keyboard: [
-                [{ text: "Buy Code ⭐", callback_data: "buy" }]
+                [{ text: "🥈 Silver Voucher (1 ⭐)", callback_data: "buy_silver" }],
+                [{ text: "🥇 Gold Voucher (2 ⭐)", callback_data: "buy_gold" }],
+                [{ text: "💎 Diamond Voucher (5 ⭐)", callback_data: "buy_diamond" }]
             ]
         }
     });
 });
 
-// Buy button handler
+// Callback query handler
 bot.on("callback_query", (query) => {
-    if (query.data === "buy") {
+    const data = query.data;
+    const chatId = query.message.chat.id;
+
+    if (data.startsWith("buy_")) {
+        const type = data.split("_")[1];
+        const voucher = VOUCHERS[type];
+
         bot.answerCallbackQuery(query.id);
 
-        const prices = [{ label: "Special Code", amount: 1 }]; // Price: 1 Star
-
         bot.sendInvoice(
-            query.message.chat.id,
-            "Purchase Code",
-            "Get a unique code",
-            "code_payload",
-            "", // provider_token remains empty for Stars (XTR)
+            chatId,
+            voucher.name,
+            `Get a unique ${voucher.name}`,
+            `payload_${type}`, // Pass the type in payload
+            "",
             "XTR",
-            prices
+            [{ label: voucher.name, amount: voucher.price }]
         );
     }
 });
@@ -96,35 +98,39 @@ bot.on("pre_checkout_query", (query) => {
 bot.on("message", async (msg) => {
     if (msg.successful_payment) {
         const chatId = msg.chat.id;
+        const payload = msg.successful_payment.invoice_payload;
+        const type = payload.split("_")[1]; // Get type from payload
+        const voucher = VOUCHERS[type];
         const code = generateCode();
 
         try {
-            // Store the code in Firebase (Quietly)
+            // Store the code with its type in Firebase
             await saveToFirebaseREST(`codes/${code}`, {
                 code: code,
+                type: type, // silver, gold, or diamond
                 used: false,
                 buyer_id: chatId,
                 buyer_username: msg.from.username || "Unknown",
                 created: Date.now()
             });
 
-            // Send the code to the user in English
+            // Success message
             await bot.sendMessage(
                 chatId,
-                "✅ Payment Successful!\n\nYour unique code is:\n\n`" + code + "`\n\nDo not share this code with anyone.",
+                `✅ Payment Successful!\n\nYour ${voucher.color} *${voucher.name}* code is:\n\n\`${code}\`\n\nDo not share this code with anyone.`,
                 { parse_mode: "Markdown" }
             );
 
         } catch (e) {
             console.error("❌ Firebase Error:", e.message);
-            // In case of error, still provide the code but log the issue
+            // Still send the code but log error
             await bot.sendMessage(
                 chatId,
-                "✅ Payment Successful!\n\nYour unique code is:\n\n`" + code + "`\n\nDo not share this code with anyone.",
+                `✅ Payment Successful!\n\nYour ${voucher.color} *${voucher.name}* code is:\n\n\`${code}\`\n\nDo not share this code with anyone.`,
                 { parse_mode: "Markdown" }
             );
         }
     }
 });
 
-console.log("🤖 English Bot with Stars Payment & Firebase is running...");
+console.log("🤖 Multi-Voucher Bot is running...");
