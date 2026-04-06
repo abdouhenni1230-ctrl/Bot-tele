@@ -12,29 +12,15 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 
-// Voucher types and prices (Stars)
-const VOUCHERS = {
-    silver: { name: "Silver Voucher", price: 1, color: "🥈" },
-    gold: { name: "Gold Voucher", price: 2, color: "🥇" },
-    diamond: { name: "Diamond Voucher", price: 5, color: "💎" }
-};
+// In-memory session to track logged-in users
+const userSessions = {};
 
-// Generate random code (8 characters)
-function generateCode(length = 8) {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let result = "";
-    for (let i = 0; i < length; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-}
-
-// Save data to Firebase via REST API
-function saveToFirebaseREST(path, data) {
+// Helper: Firebase REST API
+function firebaseREST(method, path, data = null) {
     return new Promise((resolve, reject) => {
         const url = new URL(`${databaseURL}${path}.json`);
         const options = {
-            method: 'PUT',
+            method: method,
             headers: { 'Content-Type': 'application/json' },
             timeout: 10000
         };
@@ -42,95 +28,201 @@ function saveToFirebaseREST(path, data) {
             let body = '';
             res.on('data', (chunk) => body += chunk);
             res.on('end', () => {
-                if (res.statusCode >= 200 && res.statusCode < 300) resolve(JSON.parse(body));
-                else reject(new Error(`Firebase REST Error: ${res.statusCode}`));
+                try {
+                    const parsed = body ? JSON.parse(body) : null;
+                    if (res.statusCode >= 200 && res.statusCode < 300) resolve(parsed);
+                    else reject(new Error(`Firebase Error: ${res.statusCode}`));
+                } catch (e) { reject(e); }
             });
         });
         req.on('error', (e) => reject(e));
-        req.on('timeout', () => { req.destroy(); reject(new Error("Timeout")); });
-        req.write(JSON.stringify(data));
+        if (data) req.write(JSON.stringify(data));
         req.end();
     });
 }
 
 // /start command
 bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id, "Hello 👋\nPlease choose the type of voucher you want to buy:", {
+    const chatId = msg.chat.id;
+    bot.sendMessage(chatId, "Welcome to the Game Bot! 👋\n\nPlease choose an option:", {
         reply_markup: {
             inline_keyboard: [
-                [{ text: "🥈 Silver Voucher (1 ⭐)", callback_data: "buy_silver" }],
-                [{ text: "🥇 Gold Voucher (2 ⭐)", callback_data: "buy_gold" }],
-                [{ text: "💎 Diamond Voucher (5 ⭐)", callback_data: "buy_diamond" }]
+                [{ text: "🔑 Login to Account", callback_data: "login" }],
+                [{ text: "⭐ Buy Stars", callback_data: "buy_stars" }],
+                [{ text: "👤 My Profile", callback_data: "profile" }]
             ]
         }
     });
 });
 
 // Callback query handler
-bot.on("callback_query", (query) => {
-    const data = query.data;
+bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
+    const data = query.data;
 
-    if (data.startsWith("buy_")) {
-        const type = data.split("_")[1];
-        const voucher = VOUCHERS[type];
+    bot.answerCallbackQuery(query.id);
 
-        bot.answerCallbackQuery(query.id);
+    if (data === "login") {
+        userSessions[chatId] = { step: "waiting_username" };
+        bot.sendMessage(chatId, "Please enter your **Username** in the game:");
+    } 
+    
+    else if (data === "profile") {
+        if (!userSessions[chatId] || !userSessions[chatId].username) {
+            return bot.sendMessage(chatId, "❌ You are not logged in. Please login first.", {
+                reply_markup: { inline_keyboard: [[{ text: "🔑 Login", callback_data: "login" }]] }
+            });
+        }
+        showProfile(chatId);
+    }
 
+    else if (data === "buy_stars") {
+        if (!userSessions[chatId] || !userSessions[chatId].username) {
+            return bot.sendMessage(chatId, "❌ Please login first to buy stars directly to your account.", {
+                reply_markup: { inline_keyboard: [[{ text: "🔑 Login", callback_data: "login" }]] }
+            });
+        }
+        bot.sendMessage(chatId, "Choose how many stars you want to buy:", {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "10 Stars ⭐", callback_data: "pay_10" }],
+                    [{ text: "50 Stars ⭐", callback_data: "pay_50" }],
+                    [{ text: "100 Stars ⭐", callback_data: "pay_100" }]
+                ]
+            }
+        });
+    }
+
+    else if (data.startsWith("pay_")) {
+        const amount = parseInt(data.split("_")[1]);
         bot.sendInvoice(
             chatId,
-            voucher.name,
-            `Get a unique ${voucher.name}`,
-            `payload_${type}`, // Pass the type in payload
+            `${amount} Stars`,
+            `Add ${amount} Stars directly to your account`,
+            `deposit_${amount}`,
             "",
             "XTR",
-            [{ label: voucher.name, amount: voucher.price }]
+            [{ label: "Stars", amount: amount }]
         );
     }
-});
 
-// Pre-checkout query
-bot.on("pre_checkout_query", (query) => {
-    bot.answerPreCheckoutQuery(query.id, true);
-});
-
-// Successful payment handler
-bot.on("message", async (msg) => {
-    if (msg.successful_payment) {
-        const chatId = msg.chat.id;
-        const payload = msg.successful_payment.invoice_payload;
-        const type = payload.split("_")[1]; // Get type from payload
-        const voucher = VOUCHERS[type];
-        const code = generateCode();
-
+    else if (data.startsWith("redeem_")) {
+        const giftKey = data.split("_")[1];
+        const username = userSessions[chatId].username;
+        
         try {
-            // Store the code with its type in Firebase
-            await saveToFirebaseREST(`codes/${code}`, {
-                code: code,
-                type: type, // silver, gold, or diamond
-                used: false,
-                buyer_id: chatId,
-                buyer_username: msg.from.username || "Unknown",
-                created: Date.now()
-            });
+            const gift = await firebaseREST("GET", `users/${username}/gifts/${giftKey}`);
+            if (!gift) return bot.sendMessage(chatId, "❌ Gift not found.");
 
-            // Success message
-            await bot.sendMessage(
-                chatId,
-                `✅ Payment Successful!\n\nYour ${voucher.color} *${voucher.name}* code is:\n\n\`${code}\`\n\nDo not share this code with anyone.`,
-                { parse_mode: "Markdown" }
-            );
+            // Remove gift from database
+            await firebaseREST("DELETE", `users/${username}/gifts/${giftKey}`);
+
+            // Confirmation message
+            const message = `🎁 **GIFT REDEMPTION SUCCESSFUL** 🎁\n\n` +
+                            `User: \`${username}\`\n` +
+                            `Gift Type: \`${gift.type}\`\n` +
+                            `Gift Name: \`${gift.name}\`\n\n` +
+                            `✅ This gift has been converted to a real Telegram gift request.\n\n` +
+                            `⚠️ **ACTION REQUIRED:**\n` +
+                            `Please **FORWARD** this message to @ST_Abdou to receive your real gift.`;
+
+            bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
 
         } catch (e) {
-            console.error("❌ Firebase Error:", e.message);
-            // Still send the code but log error
-            await bot.sendMessage(
-                chatId,
-                `✅ Payment Successful!\n\nYour ${voucher.color} *${voucher.name}* code is:\n\n\`${code}\`\n\nDo not share this code with anyone.`,
-                { parse_mode: "Markdown" }
-            );
+            bot.sendMessage(chatId, "❌ Error processing redemption.");
         }
     }
 });
 
-console.log("🤖 Multi-Voucher Bot is running...");
+// Handle text messages (Login Flow)
+bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text;
+
+    if (msg.successful_payment) {
+        const amount = parseInt(msg.successful_payment.invoice_payload.split("_")[1]);
+        const username = userSessions[chatId].username;
+        
+        try {
+            const userData = await firebaseREST("GET", `users/${username}`);
+            const currentStars = userData.stars || 0;
+            await firebaseREST("PATCH", `users/${username}`, { stars: currentStars + amount });
+            bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account!`);
+        } catch (e) {
+            bot.sendMessage(chatId, "❌ Payment received but failed to update database. Please contact support.");
+        }
+        return;
+    }
+
+    if (!userSessions[chatId]) return;
+
+    if (userSessions[chatId].step === "waiting_username") {
+        userSessions[chatId].tempUsername = text;
+        userSessions[chatId].step = "waiting_password";
+        bot.sendMessage(chatId, "Now enter your **Password**:");
+    } 
+    
+    else if (userSessions[chatId].step === "waiting_password") {
+        const username = userSessions[chatId].tempUsername;
+        const password = text;
+
+        try {
+            const userData = await firebaseREST("GET", `users/${username}`);
+            if (userData && userData.password === password) {
+                userSessions[chatId] = { 
+                    username: username, 
+                    step: "logged_in" 
+                };
+                bot.sendMessage(chatId, `✅ Welcome back, **${username}**! You are now logged in.`, { parse_mode: "Markdown" });
+                showProfile(chatId);
+            } else {
+                bot.sendMessage(chatId, "❌ Invalid Username or Password. Try again /start");
+                delete userSessions[chatId];
+            }
+        } catch (e) {
+            bot.sendMessage(chatId, "❌ Error connecting to database.");
+        }
+    }
+});
+
+// Show Profile Function
+async function showProfile(chatId) {
+    const username = userSessions[chatId].username;
+    try {
+        const userData = await firebaseREST("GET", `users/${username}`);
+        const gifts = userData.gifts || {};
+        const giftKeys = Object.keys(gifts);
+
+        let profileMsg = `👤 **PLAYER PROFILE**\n\n` +
+                         `Username: \`${username}\`\n` +
+                         `💰 Coins: ${userData.coins || 0}\n` +
+                         `💎 Gems: ${userData.gems || 0}\n` +
+                         `⭐ Stars: ${userData.stars || 0}\n\n` +
+                         `🎁 **YOUR GIFTS:**\n`;
+
+        const keyboard = [];
+        if (giftKeys.length > 0) {
+            giftKeys.forEach(key => {
+                const g = gifts[key];
+                profileMsg += `• ${g.name} (${g.type})\n`;
+                keyboard.push([{ text: `Redeem ${g.name}`, callback_data: `redeem_${key}` }]);
+            });
+            profileMsg += `\nClick a button below to convert to a real gift:`;
+        } else {
+            profileMsg += `_No gifts yet. Play in the Casino to win!_`;
+        }
+
+        bot.sendMessage(chatId, profileMsg, {
+            parse_mode: "Markdown",
+            reply_markup: { inline_keyboard: keyboard }
+        });
+
+    } catch (e) {
+        bot.sendMessage(chatId, "❌ Error loading profile.");
+    }
+}
+
+// Pre-checkout
+bot.on("pre_checkout_query", (q) => bot.answerPreCheckoutQuery(q.id, true));
+
+console.log("🤖 Account Bot is running...");
