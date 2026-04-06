@@ -142,12 +142,8 @@ bot.on("callback_query", async (query) => {
                 const emoji = giftEmojis[giftName.toLowerCase()] || "";
 
                 // Confirmation message
-                const message = `🎁 **GIFT REDEMPTION SUCCESSFUL** 🎁\n\n` +
-                                `User: \`${username}\`\n` +
-                                `Gift Name: ${emoji} \`${giftName}\`\n\n` +
-                                `✅ This gift has been converted to a real Telegram gift request.\n\n` +
-                                `⚠️ **ACTION REQUIRED:**\n` +
-                                `Please **FORWARD** this message to @ST_Abdou to receive your real gift.`;
+                const message = `**تم تحويل هديتك ${emoji} ${giftName} بنجاح**\n\n` +
+                                `يرجى التواصل مع @ST_Abdou وإعادة توجيه الرسالة له لتحصل على الهدية الخاصة بك. إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه رسالة نجاح التحويل مرة أخرى.`;
 
             bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
 
