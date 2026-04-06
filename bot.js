@@ -107,24 +107,47 @@ bot.on("callback_query", async (query) => {
     }
 
     else if (data.startsWith("redeem_")) {
-        const giftKey = data.split("_")[1];
-        const username = userSessions[chatId].username;
-        
-        try {
-            const gift = await firebaseREST("GET", `users/${username}/gifts/${giftKey}`);
-            if (!gift) return bot.sendMessage(chatId, "❌ Gift not found.");
+            const giftFileName = data.split("_")[1]; // e.g., "rocket.png"
+            const username = userSessions[chatId].username;
+            
+            try {
+                const userData = await firebaseREST("GET", `users/${username}`);
+                let gifts = userData.gifts || [];
 
-            // Remove gift from database
-            await firebaseREST("DELETE", `users/${username}/gifts/${giftKey}`);
+                // Ensure gifts is an array
+                if (!Array.isArray(gifts)) {
+                    if (typeof gifts === 'object' && gifts !== null) {
+                        gifts = Object.values(gifts);
+                    } else {
+                        gifts = [];
+                    }
+                }
 
-            // Confirmation message
-            const message = `🎁 **GIFT REDEMPTION SUCCESSFUL** 🎁\n\n` +
-                            `User: \`${username}\`\n` +
-                            `Gift Type: \`${gift.type}\`\n` +
-                            `Gift Name: \`${gift.name}\`\n\n` +
-                            `✅ This gift has been converted to a real Telegram gift request.\n\n` +
-                            `⚠️ **ACTION REQUIRED:**\n` +
-                            `Please **FORWARD** this message to @ST_Abdou to receive your real gift.`;
+                const giftIndex = gifts.indexOf(giftFileName);
+
+                if (giftIndex === -1) return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
+    
+                // Remove gift from the array
+                gifts.splice(giftIndex, 1);
+
+                // Update the gifts array in Firebase
+                await firebaseREST("PUT", `users/${username}/gifts`, gifts);
+    
+                const giftName = giftFileName.replace(".png", "");
+                const giftEmojis = {
+                    "rocket": "🚀",
+                    "rose": "🌹",
+                    "trophy": "🏆"
+                };
+                const emoji = giftEmojis[giftName.toLowerCase()] || "";
+
+                // Confirmation message
+                const message = `🎁 **GIFT REDEMPTION SUCCESSFUL** 🎁\n\n` +
+                                `User: \`${username}\`\n` +
+                                `Gift Name: ${emoji} \`${giftName}\`\n\n` +
+                                `✅ This gift has been converted to a real Telegram gift request.\n\n` +
+                                `⚠️ **ACTION REQUIRED:**\n` +
+                                `Please **FORWARD** this message to @ST_Abdou to receive your real gift.`;
 
             bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
 
@@ -190,8 +213,17 @@ async function showProfile(chatId) {
     const username = userSessions[chatId].username;
     try {
         const userData = await firebaseREST("GET", `users/${username}`);
-        const gifts = userData.gifts || {};
-        const giftKeys = Object.keys(gifts);
+                        const gifts = userData.gifts || [];
+                        // Ensure gifts is an array
+                        if (!Array.isArray(gifts)) {
+                            // If it's an object, convert its values to an array
+                            if (typeof gifts === 'object' && gifts !== null) {
+                                gifts = Object.values(gifts);
+                            } else {
+                                gifts = [];
+                            }
+                        }
+                        const giftNames = gifts.map(gift => gift.replace(".png", ""));
 
         let profileMsg = `👤 **PLAYER PROFILE**\n\n` +
                          `Username: \`${username}\`\n` +
@@ -200,17 +232,23 @@ async function showProfile(chatId) {
                          `⭐ Stars: ${userData.stars || 0}\n\n` +
                          `🎁 **YOUR GIFTS:**\n`;
 
-        const keyboard = [];
-        if (giftKeys.length > 0) {
-            giftKeys.forEach(key => {
-                const g = gifts[key];
-                profileMsg += `• ${g.name} (${g.type})\n`;
-                keyboard.push([{ text: `Redeem ${g.name}`, callback_data: `redeem_${key}` }]);
-            });
-            profileMsg += `\nClick a button below to convert to a real gift:`;
-        } else {
-            profileMsg += `_No gifts yet. Play in the Casino to win!_`;
-        }
+                        const giftEmojis = {
+                            "rocket": "🚀",
+                            "rose": "🌹",
+                            "trophy": "🏆"
+                        };
+
+                        const keyboard = [];
+                        if (giftNames.length > 0) {
+                            giftNames.forEach((giftName, index) => {
+                                const emoji = giftEmojis[giftName.toLowerCase()] || "";
+                                profileMsg += `• ${emoji} ${giftName}\n`;
+                                keyboard.push([{ text: `Redeem ${emoji} ${giftName}`, callback_data: `redeem_${giftName}.png` }]);
+                            });
+                            profileMsg += `\nClick a button below to convert to a real gift:`;
+                        } else {
+                            profileMsg += `_No gifts yet. Play in the Casino to win!_`;
+                        }
 
         bot.sendMessage(chatId, profileMsg, {
             parse_mode: "Markdown",
