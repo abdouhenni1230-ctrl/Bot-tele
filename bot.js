@@ -123,15 +123,12 @@ bot.on("callback_query", async (query) => {
                     }
                 }
 
-                const giftIndex = gifts.indexOf(giftFileName);
+                const updatedGifts = gifts.filter(gift => gift !== giftFileName);
 
-                if (giftIndex === -1) return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
+                if (updatedGifts.length === gifts.length) return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
     
-                // Remove gift from the array
-                gifts.splice(giftIndex, 1);
-
-                // Update the gifts array in Firebase
-                await firebaseREST("PUT", `users/${username}/gifts`, gifts);
+                // Update the gifts array in Firebase, ensuring it's always an array
+                await firebaseREST("PUT", `users/${username}/gifts`, updatedGifts);
     
                 const giftName = giftFileName.replace(".png", "");
                 const giftEmojis = {
@@ -158,20 +155,7 @@ bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
 
-    if (msg.successful_payment) {
-        const amount = parseInt(msg.successful_payment.invoice_payload.split("_")[1]);
-        const username = userSessions[chatId].username;
-        
-        try {
-            const userData = await firebaseREST("GET", `users/${username}`);
-            const currentStars = userData.stars || 0;
-            await firebaseREST("PATCH", `users/${username}`, { stars: currentStars + amount });
-            bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account!`);
-        } catch (e) {
-            bot.sendMessage(chatId, "❌ Payment received but failed to update database. Please contact support.");
-        }
-        return;
-    }
+
 
     if (!userSessions[chatId]) return;
 
@@ -258,5 +242,25 @@ async function showProfile(chatId) {
 
 // Pre-checkout
 bot.on("pre_checkout_query", (q) => bot.answerPreCheckoutQuery(q.id, true));
+
+bot.on("successful_payment", async (msg) => {
+    const chatId = msg.chat.id;
+    const amount = parseInt(msg.successful_payment.invoice_payload.split("_")[1]);
+    const username = userSessions[chatId].username;
+
+    if (!username) {
+        return bot.sendMessage(chatId, "❌ You are not logged in. Please login first to receive stars.");
+    }
+
+    try {
+        const userData = await firebaseREST("GET", `users/${username}`);
+        const currentStars = userData.stars || 0;
+        await firebaseREST("PATCH", `users/${username}`, { stars: currentStars + amount });
+        bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account!`);
+    } catch (e) {
+        console.error("Error updating stars after successful payment:", e);
+        bot.sendMessage(chatId, "❌ Payment received but failed to update database. Please contact support.");
+    }
+});
 
 console.log("🤖 Account Bot is running...");
