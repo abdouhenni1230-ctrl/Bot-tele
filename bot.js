@@ -108,6 +108,7 @@ bot.on("callback_query", async (query) => {
 
     else if (data.startsWith("redeem_")) {
             const giftFileName = data.split("_")[1]; // e.g., "rocket.png"
+            console.log(`Redeem request received for gift: ${giftFileName} from chatId: ${chatId}`);
             const username = userSessions[chatId].username;
 
             if (userSessions[chatId].redemptionInProgress) {
@@ -118,7 +119,9 @@ bot.on("callback_query", async (query) => {
             
             try {
                 const userData = await firebaseREST("GET", `users/${username}`);
+                console.log(`User data retrieved for ${username}:`, userData);
                 let gifts = userData.gifts || [];
+                console.log(`Gifts array from Firebase for ${username}:`, gifts);
 
                 // Ensure gifts is an array
                 if (!Array.isArray(gifts)) {
@@ -130,12 +133,14 @@ bot.on("callback_query", async (query) => {
                 }
 
                 const giftIndexToRemove = gifts.indexOf(giftFileName);
+                console.log(`Index of gift to remove (${giftFileName}): ${giftIndexToRemove}`);
                 if (giftIndexToRemove === -1) {
                     console.log(`Gift ${giftFileName} not found in inventory for user ${username}.`);
                     return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
                 }
                 const updatedGifts = [...gifts]; // Create a shallow copy
                 updatedGifts.splice(giftIndexToRemove, 1); // Remove only one instance
+                console.log(`Updated gifts array after splice:`, updatedGifts);
 
                 const giftName = giftFileName.replace(".png", "");
                 const giftEmojis = {
@@ -149,9 +154,10 @@ bot.on("callback_query", async (query) => {
                 const message = `**تم تحويل هديتك ${emoji} ${giftName} بنجاح**\n\n` +
                                 `يرجى التواصل مع @ST_Abdou وإعادة توجيه الرسالة له لتحصل على الهدية الخاصة بك. إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه رسالة نجاح التحويل مرة أخرى.`;
 
+                console.log(`Sending redemption success message to chatId ${chatId}:`, message);
                 // Send the message first, then update Firebase to reduce perceived latency
-                await bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
-                // Update the gifts array in Firebase, ensuring it's always an array
+                await bot.sendMessage(chatId, message, { parse_mode: "Markdown" });                console.log(`Updating Firebase for ${username} with gifts:`, updatedGifts);
+                // Update the gifts array in Firebase, ensuring it\'s always an array
                 await firebaseREST("PUT", `users/${username}/gifts`, updatedGifts);
 
         } catch (e) {
@@ -216,8 +222,16 @@ async function showProfile(chatId) {
                                 gifts = [];
                             }
                         }
-                        // No grouping, display each gift individually as it appears in the array
-                        const giftNames = gifts.map(gift => gift.replace(".png", ""));
+                        // Display each gift individually as it appears in the array
+                        // The gifts array contains strings like "rocket.png"
+                        // The gifts array contains strings like "rocket.png"
+                        // We need to display each gift individually, so no grouping here.
+                        // The giftDisplayNames will be used for display and for generating callback data.
+                        const giftDisplayItems = gifts.map(giftFileName => {
+                            const giftName = giftFileName.replace(".png", "");
+                            const emoji = giftEmojis[giftName.toLowerCase()] || "";
+                            return { original: giftFileName, display: `${emoji} ${giftName}` };
+                        });
 
         let profileMsg = `👤 **PLAYER PROFILE**\n\n` +
                          `Username: \`${username}\`\n` +
@@ -233,11 +247,10 @@ async function showProfile(chatId) {
                         };
 
                         const keyboard = [];
-                        if (giftNames.length > 0) {
-                            giftNames.forEach((giftName, index) => {
-                                const emoji = giftEmojis[giftName.toLowerCase()] || "";
-                                profileMsg += `• ${emoji} ${giftName}\n`;
-                                keyboard.push([{ text: `Redeem ${emoji} ${giftName}`, callback_data: `redeem_${giftName}.png` }]);
+                        if (giftDisplayItems.length > 0) {
+                            giftDisplayItems.forEach(item => {
+                                profileMsg += `• ${item.display}\n`;
+                                keyboard.push([{ text: `Redeem ${item.display}`, callback_data: `redeem_${item.original}` }]);
                             });
                             profileMsg += `\nClick a button below to convert to a real gift:`;
                         } else {
