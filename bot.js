@@ -85,7 +85,7 @@ bot.on("callback_query", async (query) => {
         bot.sendMessage(chatId, "Choose how many stars you want to buy:", {
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: "1 Stars ⭐", callback_data: "pay_1" }],
+                    [{ text: "10 Stars ⭐", callback_data: "pay_10" }],
                     [{ text: "50 Stars ⭐", callback_data: "pay_50" }],
                     [{ text: "100 Stars ⭐", callback_data: "pay_100" }]
                 ]
@@ -216,11 +216,8 @@ async function showProfile(chatId) {
                                 gifts = [];
                             }
                         }
-                        const giftCounts = {};
-                        gifts.forEach(gift => {
-                            const giftName = gift.replace(".png", "");
-                            giftCounts[giftName] = (giftCounts[giftName] || 0) + 1;
-                        });
+                        // No grouping, display each gift individually as it appears in the array
+                        const giftNames = gifts.map(gift => gift.replace(".png", ""));
 
         let profileMsg = `👤 **PLAYER PROFILE**\n\n` +
                          `Username: \`${username}\`\n` +
@@ -236,12 +233,10 @@ async function showProfile(chatId) {
                         };
 
                         const keyboard = [];
-                        const groupedGifts = Object.keys(giftCounts);
-                        if (groupedGifts.length > 0) {
-                            groupedGifts.forEach(giftName => {
-                                const count = giftCounts[giftName];
+                        if (giftNames.length > 0) {
+                            giftNames.forEach((giftName, index) => {
                                 const emoji = giftEmojis[giftName.toLowerCase()] || "";
-                                profileMsg += `• ${emoji} ${giftName} (x${count})\n`;
+                                profileMsg += `• ${emoji} ${giftName}\n`;
                                 keyboard.push([{ text: `Redeem ${emoji} ${giftName}`, callback_data: `redeem_${giftName}.png` }]);
                             });
                             profileMsg += `\nClick a button below to convert to a real gift:`;
