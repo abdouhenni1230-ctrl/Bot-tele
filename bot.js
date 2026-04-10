@@ -12,7 +12,7 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 
-// In-memory session to track logged-in users
+// In-memory session to track logged-in users and their state
 const userSessions = {};
 
 // Helper: Firebase REST API
@@ -31,7 +31,7 @@ function firebaseREST(method, path, data = null) {
                 try {
                     const parsed = body ? JSON.parse(body) : null;
                     if (res.statusCode >= 200 && res.statusCode < 300) resolve(parsed);
-                    else reject(new Error(`Firebase Error: ${res.statusCode}`));
+                    else reject(new Error(`Firebase Error: ${res.statusCode} - ${body}`));
                 } catch (e) { reject(e); }
             });
         });
@@ -64,9 +64,9 @@ bot.on("callback_query", async (query) => {
 
     if (data === "login") {
         userSessions[chatId] = { step: "waiting_username" };
-        bot.sendMessage(chatId, "Please enter your **Username** in the game:");
+        bot.sendMessage(chatId, "Please enter your **Username** in the game:", { parse_mode: "Markdown" });
     } 
-    
+
     else if (data === "profile") {
         if (!userSessions[chatId] || !userSessions[chatId].username) {
             return bot.sendMessage(chatId, "❌ You are not logged in. Please login first.", {
@@ -100,15 +100,20 @@ bot.on("callback_query", async (query) => {
             `${amount} Stars`,
             `Add ${amount} Stars directly to your account`,
             `deposit_${amount}`,
-            "",
+            "", // You need to provide a provider token here for actual payments
             "XTR",
-            [{ label: "Stars", amount: amount }]
+            [{ label: "Stars", amount: amount * 100 }] // Amount in smallest units (e.g., cents)
         );
     }
 
     else if (data.startsWith("redeem_")) {
             const giftFileName = data.split("_")[1]; // e.g., "rocket.png"
             console.log(`Redeem request received for gift: ${giftFileName} from chatId: ${chatId}`);
+            
+            if (!userSessions[chatId] || !userSessions[chatId].username) {
+                console.log(`User not logged in for chatId ${chatId}. Cannot redeem.`);
+                return bot.sendMessage(chatId, "❌ You are not logged in. Please login first to redeem gifts.");
+            }
             const username = userSessions[chatId].username;
 
             if (userSessions[chatId].redemptionInProgress) {
@@ -116,12 +121,13 @@ bot.on("callback_query", async (query) => {
                 return bot.sendMessage(chatId, "⏳ Your previous redemption request is still being processed. Please wait a moment.");
             }
             userSessions[chatId].redemptionInProgress = true;
-            
+
             try {
                 const userData = await firebaseREST("GET", `users/${username}`);
                 console.log(`User data retrieved for ${username}:`, userData);
+                
                 let gifts = userData.gifts || [];
-                console.log(`Gifts array from Firebase for ${username}:`, gifts);
+                console.log(`Gifts array from Firebase for ${username} (raw):`, gifts);
 
                 // Ensure gifts is an array
                 if (!Array.isArray(gifts)) {
@@ -131,11 +137,13 @@ bot.on("callback_query", async (query) => {
                         gifts = [];
                     }
                 }
+                console.log(`Gifts array from Firebase for ${username} (normalized):`, gifts);
 
                 const giftIndexToRemove = gifts.indexOf(giftFileName);
                 console.log(`Index of gift to remove (${giftFileName}): ${giftIndexToRemove}`);
                 if (giftIndexToRemove === -1) {
                     console.log(`Gift ${giftFileName} not found in inventory for user ${username}.`);
+                    userSessions[chatId].redemptionInProgress = false; // Reset flag
                     return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
                 }
                 const updatedGifts = [...gifts]; // Create a shallow copy
@@ -156,13 +164,14 @@ bot.on("callback_query", async (query) => {
 
                 console.log(`Sending redemption success message to chatId ${chatId}:`, message);
                 // Send the message first, then update Firebase to reduce perceived latency
-                await bot.sendMessage(chatId, message, { parse_mode: "Markdown" });                console.log(`Updating Firebase for ${username} with gifts:`, updatedGifts);
-                // Update the gifts array in Firebase, ensuring it\'s always an array
+                await bot.sendMessage(chatId, message, { parse_mode: "Markdown" });                
+                console.log(`Updating Firebase for ${username} with gifts:`, updatedGifts);
+                // Update the gifts array in Firebase, ensuring it's always an array
                 await firebaseREST("PUT", `users/${username}/gifts`, updatedGifts);
 
         } catch (e) {
             console.error("Error processing redemption:", e);
-            bot.sendMessage(chatId, "❌ Error processing redemption.");
+            bot.sendMessage(chatId, "❌ Error processing redemption. Please try again later.");
         } finally {
             userSessions[chatId].redemptionInProgress = false;
         }
@@ -174,16 +183,17 @@ bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
 
-
-
-    if (!userSessions[chatId]) return;
+    // Ignore commands or messages not part of a session
+    if (!userSessions[chatId] || !userSessions[chatId].step) {
+        return;
+    }
 
     if (userSessions[chatId].step === "waiting_username") {
         userSessions[chatId].tempUsername = text;
         userSessions[chatId].step = "waiting_password";
-        bot.sendMessage(chatId, "Now enter your **Password**:");
+        bot.sendMessage(chatId, "Now enter your **Password**:", { parse_mode: "Markdown" });
     } 
-    
+
     else if (userSessions[chatId].step === "waiting_password") {
         const username = userSessions[chatId].tempUsername;
         const password = text;
@@ -198,40 +208,52 @@ bot.on("message", async (msg) => {
                 bot.sendMessage(chatId, `✅ Welcome back, **${username}**! You are now logged in.`, { parse_mode: "Markdown" });
                 showProfile(chatId);
             } else {
-                bot.sendMessage(chatId, "❌ Invalid Username or Password. Try again /start");
-                delete userSessions[chatId];
+                bot.sendMessage(chatId, "❌ Invalid Username or Password. Please try again or use /start.");
+                delete userSessions[chatId]; // Clear session on failed login
             }
         } catch (e) {
-            bot.sendMessage(chatId, "❌ Error connecting to database.");
+            console.error("Error during login process:", e);
+            bot.sendMessage(chatId, "❌ Error connecting to database during login. Please try again later.");
+            delete userSessions[chatId]; // Clear session on database error
         }
     }
 });
 
 // Show Profile Function
 async function showProfile(chatId) {
+    if (!userSessions[chatId] || !userSessions[chatId].username) {
+        return bot.sendMessage(chatId, "❌ You are not logged in. Please login first.", {
+            reply_markup: { inline_keyboard: [[{ text: "🔑 Login", callback_data: "login" }]] }
+        });
+    }
     const username = userSessions[chatId].username;
     try {
         const userData = await firebaseREST("GET", `users/${username}`);
-                        const gifts = userData.gifts || [];
-                        // Ensure gifts is an array
-                        if (!Array.isArray(gifts)) {
-                            // If it's an object, convert its values to an array
-                            if (typeof gifts === 'object' && gifts !== null) {
-                                gifts = Object.values(gifts);
-                            } else {
-                                gifts = [];
-                            }
-                        }
-                        // Display each gift individually as it appears in the array
-                        // The gifts array contains strings like "rocket.png"
-                        // The gifts array contains strings like "rocket.png"
-                        // We need to display each gift individually, so no grouping here.
-                        // The giftDisplayNames will be used for display and for generating callback data.
-                        const giftDisplayItems = gifts.map(giftFileName => {
-                            const giftName = giftFileName.replace(".png", "");
-                            const emoji = giftEmojis[giftName.toLowerCase()] || "";
-                            return { original: giftFileName, display: `${emoji} ${giftName}` };
-                        });
+        if (!userData) {
+            return bot.sendMessage(chatId, "❌ User data not found. Please try logging in again.");
+        }
+
+        let gifts = userData.gifts || [];
+        // Ensure gifts is an array
+        if (!Array.isArray(gifts)) {
+            if (typeof gifts === 'object' && gifts !== null) {
+                gifts = Object.values(gifts);
+            } else {
+                gifts = [];
+            }
+        }
+        
+        const giftEmojis = {
+            "rocket": "🚀",
+            "rose": "🌹",
+            "trophy": "🏆"
+        };
+
+        const giftDisplayItems = gifts.map(giftFileName => {
+            const giftName = giftFileName.replace(".png", "");
+            const emoji = giftEmojis[giftName.toLowerCase()] || "";
+            return { original: giftFileName, display: `${emoji} ${giftName}` };
+        });
 
         let profileMsg = `👤 **PLAYER PROFILE**\n\n` +
                          `Username: \`${username}\`\n` +
@@ -240,22 +262,16 @@ async function showProfile(chatId) {
                          `⭐ Stars: ${userData.stars || 0}\n\n` +
                          `🎁 **YOUR GIFTS:**\n`;
 
-                        const giftEmojis = {
-                            "rocket": "🚀",
-                            "rose": "🌹",
-                            "trophy": "🏆"
-                        };
-
-                        const keyboard = [];
-                        if (giftDisplayItems.length > 0) {
-                            giftDisplayItems.forEach(item => {
-                                profileMsg += `• ${item.display}\n`;
-                                keyboard.push([{ text: `Redeem ${item.display}`, callback_data: `redeem_${item.original}` }]);
-                            });
-                            profileMsg += `\nClick a button below to convert to a real gift:`;
-                        } else {
-                            profileMsg += `_No gifts yet. Play in the Casino to win!_`;
-                        }
+        const keyboard = [];
+        if (giftDisplayItems.length > 0) {
+            giftDisplayItems.forEach(item => {
+                profileMsg += `• ${item.display}\n`;
+                keyboard.push([{ text: `Redeem ${item.display}`, callback_data: `redeem_${item.original}` }]);
+            });
+            profileMsg += `\nClick a button below to convert to a real gift:`;
+        } else {
+            profileMsg += `_No gifts yet. Play in the Casino to win!_`;
+        }
 
         bot.sendMessage(chatId, profileMsg, {
             parse_mode: "Markdown",
@@ -263,7 +279,8 @@ async function showProfile(chatId) {
         });
 
     } catch (e) {
-        bot.sendMessage(chatId, "❌ Error loading profile.");
+        console.error("Error loading profile:", e);
+        bot.sendMessage(chatId, "❌ Error loading profile. Please try again later.");
     }
 }
 
@@ -273,11 +290,10 @@ bot.on("pre_checkout_query", (q) => bot.answerPreCheckoutQuery(q.id, true));
 bot.on("successful_payment", async (msg) => {
     const chatId = msg.chat.id;
     const amount = parseInt(msg.successful_payment.invoice_payload.split("_")[1]);
-    const username = userSessions[chatId].username;
+    const username = userSessions[chatId] ? userSessions[chatId].username : null;
 
     if (!username) {
         console.error(`Username not found in session for chatId ${chatId} during successful payment.`);
-        console.log(`Payment failed for chatId ${chatId} due to missing username.`);
         return bot.sendMessage(chatId, "❌ You are not logged in. Please login first to receive stars.");
     }
 
@@ -290,7 +306,6 @@ bot.on("successful_payment", async (msg) => {
     } catch (e) {
         console.error("Error updating stars after successful payment:", e);
         bot.sendMessage(chatId, "❌ Payment received but failed to update database. Please contact support.");
-        console.log(`Payment failed for chatId ${chatId} due to database update error: ${e.message}`);
     }
 });
 
