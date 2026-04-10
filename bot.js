@@ -12,7 +12,7 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 
-// In-memory session to track logged-in users and their state
+// In-memory session to track logged-in users
 const userSessions = {};
 
 // Helper: Firebase REST API
@@ -100,80 +100,56 @@ bot.on("callback_query", async (query) => {
             `${amount} Stars`,
             `Add ${amount} Stars directly to your account`,
             `deposit_${amount}`,
-            "", // You need to provide a provider token here for actual payments
+            "", 
             "XTR",
-            [{ label: "Stars", amount: amount * 100 }] // Amount in smallest units (e.g., cents)
+            [{ label: "Stars", amount: amount * 100 }]
         );
     }
 
     else if (data.startsWith("redeem_")) {
-            const giftFileName = data.split("_")[1]; // e.g., "rocket.png"
-            console.log(`Redeem request received for gift: ${giftFileName} from chatId: ${chatId}`);
-            
-            if (!userSessions[chatId] || !userSessions[chatId].username) {
-                console.log(`User not logged in for chatId ${chatId}. Cannot redeem.`);
-                return bot.sendMessage(chatId, "❌ You are not logged in. Please login first to redeem gifts.");
+        const giftFileName = data.split("_")[1]; // e.g., "rocket.png"
+        
+        if (!userSessions[chatId] || !userSessions[chatId].username) {
+            return bot.sendMessage(chatId, "❌ You are not logged in. Please login first.");
+        }
+        
+        const username = userSessions[chatId].username;
+
+        try {
+            // 1. Get current user data
+            const userData = await firebaseREST("GET", `users/${username}`);
+            let gifts = userData.gifts || [];
+
+            // 2. Normalize gifts to array
+            if (!Array.isArray(gifts)) {
+                gifts = (typeof gifts === 'object' && gifts !== null) ? Object.values(gifts) : [];
             }
-            const username = userSessions[chatId].username;
 
-            if (userSessions[chatId].redemptionInProgress) {
-                console.log(`Redemption already in progress for chatId ${chatId}. Ignoring duplicate request.`);
-                return bot.sendMessage(chatId, "⏳ Your previous redemption request is still being processed. Please wait a moment.");
+            // 3. Find and remove the gift
+            const giftIndex = gifts.indexOf(giftFileName);
+            if (giftIndex === -1) {
+                return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
             }
-            userSessions[chatId].redemptionInProgress = true;
 
-            try {
-                const userData = await firebaseREST("GET", `users/${username}`);
-                console.log(`User data retrieved for ${username}:`, userData);
-                
-                let gifts = userData.gifts || [];
-                console.log(`Gifts array from Firebase for ${username} (raw):`, gifts);
+            gifts.splice(giftIndex, 1); // Remove one instance
 
-                // Ensure gifts is an array
-                if (!Array.isArray(gifts)) {
-                    if (typeof gifts === 'object' && gifts !== null) {
-                        gifts = Object.values(gifts);
-                    } else {
-                        gifts = [];
-                    }
-                }
-                console.log(`Gifts array from Firebase for ${username} (normalized):`, gifts);
+            // 4. Update Firebase
+            await firebaseREST("PUT", `users/${username}/gifts`, gifts);
 
-                const giftIndexToRemove = gifts.indexOf(giftFileName);
-                console.log(`Index of gift to remove (${giftFileName}): ${giftIndexToRemove}`);
-                if (giftIndexToRemove === -1) {
-                    console.log(`Gift ${giftFileName} not found in inventory for user ${username}.`);
-                    userSessions[chatId].redemptionInProgress = false; // Reset flag
-                    return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
-                }
-                const updatedGifts = [...gifts]; // Create a shallow copy
-                updatedGifts.splice(giftIndexToRemove, 1); // Remove only one instance
-                console.log(`Updated gifts array after splice:`, updatedGifts);
+            // 5. Send success message
+            const giftName = giftFileName.replace(".png", "");
+            const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
+            const emoji = giftEmojis[giftName.toLowerCase()] || "🎁";
 
-                const giftName = giftFileName.replace(".png", "");
-                const giftEmojis = {
-                    "rocket": "🚀",
-                    "rose": "🌹",
-                    "trophy": "🏆"
-                };
-                const emoji = giftEmojis[giftName.toLowerCase()] || "";
+            const successMsg = `**تم تحويل هديتك ${emoji} ${giftName} بنجاح** ✅\n\n` +
+                               `يرجى التواصل مع @ST_Abdou وإعادة توجيه هذه الرسالة له لتحصل على هديتك.\n\n` +
+                               `إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه الرسالة مرة أخرى.`;
 
-                // Confirmation message
-                const message = `**تم تحويل هديتك ${emoji} ${giftName} بنجاح**\n\n` +
-                                `يرجى التواصل مع @ST_Abdou وإعادة توجيه الرسالة له لتحصل على الهدية الخاصة بك. إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه رسالة نجاح التحويل مرة أخرى.`;
-
-                console.log(`Sending redemption success message to chatId ${chatId}:`, message);
-                // Send the message first, then update Firebase to reduce perceived latency
-                await bot.sendMessage(chatId, message, { parse_mode: "Markdown" });                
-                console.log(`Updating Firebase for ${username} with gifts:`, updatedGifts);
-                // Update the gifts array in Firebase, ensuring it's always an array
-                await firebaseREST("PUT", `users/${username}/gifts`, updatedGifts);
+            await bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
 
         } catch (e) {
-            console.error("Error processing redemption:", e);
-            bot.sendMessage(chatId, "❌ Error processing redemption. Please try again later.");
-        } finally {
-            userSessions[chatId].redemptionInProgress = false;
+            console.error("Redemption Error:", e);
+            bot.sendMessage(chatId, "❌ Error processing redemption. Please try again.");
         }
     }
 });
@@ -183,10 +159,7 @@ bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
 
-    // Ignore commands or messages not part of a session
-    if (!userSessions[chatId] || !userSessions[chatId].step) {
-        return;
-    }
+    if (!userSessions[chatId] || !userSessions[chatId].step) return;
 
     if (userSessions[chatId].step === "waiting_username") {
         userSessions[chatId].tempUsername = text;
@@ -201,60 +174,32 @@ bot.on("message", async (msg) => {
         try {
             const userData = await firebaseREST("GET", `users/${username}`);
             if (userData && userData.password === password) {
-                userSessions[chatId] = { 
-                    username: username, 
-                    step: "logged_in" 
-                };
+                userSessions[chatId] = { username: username, step: "logged_in" };
                 bot.sendMessage(chatId, `✅ Welcome back, **${username}**! You are now logged in.`, { parse_mode: "Markdown" });
                 showProfile(chatId);
             } else {
-                bot.sendMessage(chatId, "❌ Invalid Username or Password. Please try again or use /start.");
-                delete userSessions[chatId]; // Clear session on failed login
+                bot.sendMessage(chatId, "❌ Invalid Username or Password. Try again /start");
+                delete userSessions[chatId];
             }
         } catch (e) {
-            console.error("Error during login process:", e);
-            bot.sendMessage(chatId, "❌ Error connecting to database during login. Please try again later.");
-            delete userSessions[chatId]; // Clear session on database error
+            bot.sendMessage(chatId, "❌ Error connecting to database.");
+            delete userSessions[chatId];
         }
     }
 });
 
 // Show Profile Function
 async function showProfile(chatId) {
-    if (!userSessions[chatId] || !userSessions[chatId].username) {
-        return bot.sendMessage(chatId, "❌ You are not logged in. Please login first.", {
-            reply_markup: { inline_keyboard: [[{ text: "🔑 Login", callback_data: "login" }]] }
-        });
-    }
     const username = userSessions[chatId].username;
     try {
         const userData = await firebaseREST("GET", `users/${username}`);
-        if (!userData) {
-            return bot.sendMessage(chatId, "❌ User data not found. Please try logging in again.");
-        }
-
         let gifts = userData.gifts || [];
-        // Ensure gifts is an array
         if (!Array.isArray(gifts)) {
-            if (typeof gifts === 'object' && gifts !== null) {
-                gifts = Object.values(gifts);
-            } else {
-                gifts = [];
-            }
+            gifts = (typeof gifts === 'object' && gifts !== null) ? Object.values(gifts) : [];
         }
-        
-        const giftEmojis = {
-            "rocket": "🚀",
-            "rose": "🌹",
-            "trophy": "🏆"
-        };
 
-        const giftDisplayItems = gifts.map(giftFileName => {
-            const giftName = giftFileName.replace(".png", "");
-            const emoji = giftEmojis[giftName.toLowerCase()] || "";
-            return { original: giftFileName, display: `${emoji} ${giftName}` };
-        });
-
+        const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
+        const keyboard = [];
         let profileMsg = `👤 **PLAYER PROFILE**\n\n` +
                          `Username: \`${username}\`\n` +
                          `💰 Coins: ${userData.coins || 0}\n` +
@@ -262,15 +207,16 @@ async function showProfile(chatId) {
                          `⭐ Stars: ${userData.stars || 0}\n\n` +
                          `🎁 **YOUR GIFTS:**\n`;
 
-        const keyboard = [];
-        if (giftDisplayItems.length > 0) {
-            giftDisplayItems.forEach(item => {
-                profileMsg += `• ${item.display}\n`;
-                keyboard.push([{ text: `Redeem ${item.display}`, callback_data: `redeem_${item.original}` }]);
+        if (gifts.length > 0) {
+            gifts.forEach(giftFile => {
+                const name = giftFile.replace(".png", "");
+                const emoji = giftEmojis[name.toLowerCase()] || "🎁";
+                profileMsg += `• ${emoji} ${name}\n`;
+                keyboard.push([{ text: `Redeem ${emoji} ${name}`, callback_data: `redeem_${giftFile}` }]);
             });
             profileMsg += `\nClick a button below to convert to a real gift:`;
         } else {
-            profileMsg += `_No gifts yet. Play in the Casino to win!_`;
+            profileMsg += `_No gifts yet._`;
         }
 
         bot.sendMessage(chatId, profileMsg, {
@@ -279,8 +225,7 @@ async function showProfile(chatId) {
         });
 
     } catch (e) {
-        console.error("Error loading profile:", e);
-        bot.sendMessage(chatId, "❌ Error loading profile. Please try again later.");
+        bot.sendMessage(chatId, "❌ Error loading profile.");
     }
 }
 
@@ -292,20 +237,15 @@ bot.on("successful_payment", async (msg) => {
     const amount = parseInt(msg.successful_payment.invoice_payload.split("_")[1]);
     const username = userSessions[chatId] ? userSessions[chatId].username : null;
 
-    if (!username) {
-        console.error(`Username not found in session for chatId ${chatId} during successful payment.`);
-        return bot.sendMessage(chatId, "❌ You are not logged in. Please login first to receive stars.");
-    }
-
-    try {
-        const userData = await firebaseREST("GET", `users/${username}`);
-        const currentStars = userData.stars || 0;
-        await firebaseREST("PATCH", `users/${username}`, { stars: currentStars + amount });
-        console.log(`Sending success message for payment to chatId ${chatId}, username ${username}, amount ${amount}.`);
-        bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account!`);
-    } catch (e) {
-        console.error("Error updating stars after successful payment:", e);
-        bot.sendMessage(chatId, "❌ Payment received but failed to update database. Please contact support.");
+    if (username) {
+        try {
+            const userData = await firebaseREST("GET", `users/${username}`);
+            const currentStars = userData.stars || 0;
+            await firebaseREST("PATCH", `users/${username}`, { stars: currentStars + amount });
+            bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account!`);
+        } catch (e) {
+            bot.sendMessage(chatId, "❌ Payment received but failed to update database.");
+        }
     }
 });
 
