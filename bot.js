@@ -121,38 +121,39 @@ bot.on("callback_query", async (query) => {
             if (!userData) throw new Error("User not found");
 
             let gifts = userData.gifts;
-            let updatedGifts = [];
+            let found = false;
 
             // 2. Handle different formats of gifts (Array or Object)
             if (Array.isArray(gifts)) {
-                updatedGifts = [...gifts];
-                const index = updatedGifts.indexOf(giftFileName);
+                const index = gifts.indexOf(giftFileName);
                 if (index !== -1) {
-                    updatedGifts.splice(index, 1);
-                } else {
-                    return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
+                    gifts.splice(index, 1);
+                    await firebaseREST("PUT", `users/${username}/gifts`, gifts);
+                    found = true;
                 }
             } else if (typeof gifts === 'object' && gifts !== null) {
-                // If Firebase stored it as an object (common with push keys)
                 const keys = Object.keys(gifts);
                 const keyToRemove = keys.find(key => gifts[key] === giftFileName);
                 if (keyToRemove) {
-                    // Delete specific key in Firebase
                     await firebaseREST("DELETE", `users/${username}/gifts/${keyToRemove}`);
-                    // Skip the PUT below since we already deleted the specific key
-                    return sendRedeemSuccess(chatId, giftFileName);
-                } else {
-                    return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
+                    found = true;
                 }
-            } else {
-                return bot.sendMessage(chatId, "❌ No gifts found in your inventory.");
             }
 
-            // 3. Update Firebase (for Array format)
-            await firebaseREST("PUT", `users/${username}/gifts`, updatedGifts);
-            
-            // 4. Send success message
-            await sendRedeemSuccess(chatId, giftFileName);
+            if (found) {
+                // 3. Send success message directly
+                const giftName = giftFileName.replace(".png", "");
+                const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
+                const emoji = giftEmojis[giftName.toLowerCase()] || "🎁";
+
+                const successMsg = `**تم تحويل هديتك ${emoji} ${giftName} بنجاح** ✅\n\n` +
+                                   `يرجى التواصل مع @ST_Abdou وإعادة توجيه هذه الرسالة له لتحصل على هديتك.\n\n` +
+                                   `إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه الرسالة مرة أخرى.`;
+
+                await bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
+            } else {
+                bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
+            }
 
         } catch (e) {
             console.error("Redemption Error:", e);
@@ -160,19 +161,6 @@ bot.on("callback_query", async (query) => {
         }
     }
 });
-
-// Helper to send success message
-async function sendRedeemSuccess(chatId, giftFileName) {
-    const giftName = giftFileName.replace(".png", "");
-    const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
-    const emoji = giftEmojis[giftName.toLowerCase()] || "🎁";
-
-    const successMsg = `**تم تحويل هديتك ${emoji} ${giftName} بنجاح** ✅\n\n` +
-                       `يرجى التواصل مع @ST_Abdou وإعادة توجيه هذه الرسالة له لتحصل على هديتك.\n\n` +
-                       `إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه الرسالة مرة أخرى.`;
-
-    return bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
-}
 
 // Handle text messages (Login Flow)
 bot.on("message", async (msg) => {
@@ -215,7 +203,6 @@ async function showProfile(chatId) {
         const userData = await firebaseREST("GET", `users/${username}`);
         let gifts = userData.gifts || [];
         
-        // Normalize for display
         let giftList = [];
         if (Array.isArray(gifts)) {
             giftList = gifts;
