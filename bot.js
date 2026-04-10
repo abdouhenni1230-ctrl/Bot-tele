@@ -118,34 +118,41 @@ bot.on("callback_query", async (query) => {
         try {
             // 1. Get current user data
             const userData = await firebaseREST("GET", `users/${username}`);
-            let gifts = userData.gifts || [];
+            if (!userData) throw new Error("User not found");
 
-            // 2. Normalize gifts to array
-            if (!Array.isArray(gifts)) {
-                gifts = (typeof gifts === 'object' && gifts !== null) ? Object.values(gifts) : [];
+            let gifts = userData.gifts;
+            let updatedGifts = [];
+
+            // 2. Handle different formats of gifts (Array or Object)
+            if (Array.isArray(gifts)) {
+                updatedGifts = [...gifts];
+                const index = updatedGifts.indexOf(giftFileName);
+                if (index !== -1) {
+                    updatedGifts.splice(index, 1);
+                } else {
+                    return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
+                }
+            } else if (typeof gifts === 'object' && gifts !== null) {
+                // If Firebase stored it as an object (common with push keys)
+                const keys = Object.keys(gifts);
+                const keyToRemove = keys.find(key => gifts[key] === giftFileName);
+                if (keyToRemove) {
+                    // Delete specific key in Firebase
+                    await firebaseREST("DELETE", `users/${username}/gifts/${keyToRemove}`);
+                    // Skip the PUT below since we already deleted the specific key
+                    return sendRedeemSuccess(chatId, giftFileName);
+                } else {
+                    return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
+                }
+            } else {
+                return bot.sendMessage(chatId, "❌ No gifts found in your inventory.");
             }
 
-            // 3. Find and remove the gift
-            const giftIndex = gifts.indexOf(giftFileName);
-            if (giftIndex === -1) {
-                return bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
-            }
-
-            gifts.splice(giftIndex, 1); // Remove one instance
-
-            // 4. Update Firebase
-            await firebaseREST("PUT", `users/${username}/gifts`, gifts);
-
-            // 5. Send success message
-            const giftName = giftFileName.replace(".png", "");
-            const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
-            const emoji = giftEmojis[giftName.toLowerCase()] || "🎁";
-
-            const successMsg = `**تم تحويل هديتك ${emoji} ${giftName} بنجاح** ✅\n\n` +
-                               `يرجى التواصل مع @ST_Abdou وإعادة توجيه هذه الرسالة له لتحصل على هديتك.\n\n` +
-                               `إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه الرسالة مرة أخرى.`;
-
-            await bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
+            // 3. Update Firebase (for Array format)
+            await firebaseREST("PUT", `users/${username}/gifts`, updatedGifts);
+            
+            // 4. Send success message
+            await sendRedeemSuccess(chatId, giftFileName);
 
         } catch (e) {
             console.error("Redemption Error:", e);
@@ -153,6 +160,19 @@ bot.on("callback_query", async (query) => {
         }
     }
 });
+
+// Helper to send success message
+async function sendRedeemSuccess(chatId, giftFileName) {
+    const giftName = giftFileName.replace(".png", "");
+    const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
+    const emoji = giftEmojis[giftName.toLowerCase()] || "🎁";
+
+    const successMsg = `**تم تحويل هديتك ${emoji} ${giftName} بنجاح** ✅\n\n` +
+                       `يرجى التواصل مع @ST_Abdou وإعادة توجيه هذه الرسالة له لتحصل على هديتك.\n\n` +
+                       `إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه الرسالة مرة أخرى.`;
+
+    return bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
+}
 
 // Handle text messages (Login Flow)
 bot.on("message", async (msg) => {
@@ -194,8 +214,13 @@ async function showProfile(chatId) {
     try {
         const userData = await firebaseREST("GET", `users/${username}`);
         let gifts = userData.gifts || [];
-        if (!Array.isArray(gifts)) {
-            gifts = (typeof gifts === 'object' && gifts !== null) ? Object.values(gifts) : [];
+        
+        // Normalize for display
+        let giftList = [];
+        if (Array.isArray(gifts)) {
+            giftList = gifts;
+        } else if (typeof gifts === 'object' && gifts !== null) {
+            giftList = Object.values(gifts);
         }
 
         const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
@@ -207,8 +232,8 @@ async function showProfile(chatId) {
                          `⭐ Stars: ${userData.stars || 0}\n\n` +
                          `🎁 **YOUR GIFTS:**\n`;
 
-        if (gifts.length > 0) {
-            gifts.forEach(giftFile => {
+        if (giftList.length > 0) {
+            giftList.forEach(giftFile => {
                 const name = giftFile.replace(".png", "");
                 const emoji = giftEmojis[name.toLowerCase()] || "🎁";
                 profileMsg += `• ${emoji} ${name}\n`;
