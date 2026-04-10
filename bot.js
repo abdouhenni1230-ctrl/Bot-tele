@@ -31,7 +31,7 @@ function firebaseREST(method, path, data = null) {
                 try {
                     const parsed = body ? JSON.parse(body) : null;
                     if (res.statusCode >= 200 && res.statusCode < 300) resolve(parsed);
-                    else reject(new Error(`Firebase Error: ${res.statusCode} - ${body}`));
+                    else reject(new Error(`Firebase Error: ${res.statusCode}`));
                 } catch (e) { reject(e); }
             });
         });
@@ -118,10 +118,12 @@ bot.on("callback_query", async (query) => {
         try {
             // 1. Get current user data
             const userData = await firebaseREST("GET", `users/${username}`);
-            if (!userData) throw new Error("User not found");
+            if (!userData) {
+                return bot.sendMessage(chatId, "❌ User data not found.");
+            }
 
             let gifts = userData.gifts;
-            let found = false;
+            let isDeleted = false;
 
             // 2. Handle different formats of gifts (Array or Object)
             if (Array.isArray(gifts)) {
@@ -129,19 +131,19 @@ bot.on("callback_query", async (query) => {
                 if (index !== -1) {
                     gifts.splice(index, 1);
                     await firebaseREST("PUT", `users/${username}/gifts`, gifts);
-                    found = true;
+                    isDeleted = true;
                 }
             } else if (typeof gifts === 'object' && gifts !== null) {
                 const keys = Object.keys(gifts);
                 const keyToRemove = keys.find(key => gifts[key] === giftFileName);
                 if (keyToRemove) {
                     await firebaseREST("DELETE", `users/${username}/gifts/${keyToRemove}`);
-                    found = true;
+                    isDeleted = true;
                 }
             }
 
-            if (found) {
-                // 3. Send success message directly
+            // 3. Send success message ONLY if deletion was successful
+            if (isDeleted) {
                 const giftName = giftFileName.replace(".png", "");
                 const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
                 const emoji = giftEmojis[giftName.toLowerCase()] || "🎁";
@@ -156,8 +158,12 @@ bot.on("callback_query", async (query) => {
             }
 
         } catch (e) {
-            console.error("Redemption Error:", e);
-            bot.sendMessage(chatId, "❌ Error processing redemption. Please try again.");
+            // If the error is just about the message sending but deletion worked, we don't want to show error
+            console.error("Redemption Error Details:", e);
+            // Only show error if it's NOT a Telegram message error (since deletion might have worked)
+            if (!e.message.includes("message")) {
+                bot.sendMessage(chatId, "❌ Error processing redemption. Please try again.");
+            }
         }
     }
 });
