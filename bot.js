@@ -10,7 +10,25 @@ if (!token) {
     process.exit(1);
 }
 
+// Initialize bot with polling and error handling
 const bot = new TelegramBot(token, { polling: true });
+
+// Global Error Handlers to prevent bot from crashing
+process.on('uncaughtException', (err) => {
+    console.error('🔥 Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+bot.on('polling_error', (error) => {
+    console.error('📡 Polling Error:', error.code); 
+});
+
+bot.on('error', (error) => {
+    console.error('🤖 Bot Error:', error);
+});
 
 // In-memory session to track logged-in users
 const userSessions = {};
@@ -22,7 +40,7 @@ function firebaseREST(method, path, data = null) {
         const options = {
             method: method,
             headers: { 'Content-Type': 'application/json' },
-            timeout: 10000
+            timeout: 15000 // Increased timeout for stability
         };
         const req = https.request(url, options, (res) => {
             let body = '';
@@ -31,7 +49,7 @@ function firebaseREST(method, path, data = null) {
                 try {
                     const parsed = body ? JSON.parse(body) : null;
                     if (res.statusCode >= 200 && res.statusCode < 300) resolve(parsed);
-                    else reject(new Error(`Firebase Error: ${res.statusCode} - ${body}`));
+                    else reject(new Error(`Firebase Error: ${res.statusCode}`));
                 } catch (e) { reject(e); }
             });
         });
@@ -55,7 +73,7 @@ bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     bot.sendMessage(chatId, "Welcome to the Game Bot! 👋\n\nPlease choose an option:", {
         reply_markup: mainMenuMarkup
-    });
+    }).catch(err => console.error("Start error:", err.message));
 });
 
 // Callback query handler
@@ -64,123 +82,123 @@ bot.on("callback_query", async (query) => {
     const messageId = query.message.message_id;
     const data = query.data;
 
-    bot.answerCallbackQuery(query.id);
+    try {
+        bot.answerCallbackQuery(query.id).catch(() => {});
 
-    if (data === "main_menu") {
-        bot.editMessageText("Welcome to the Game Bot! 👋\n\nPlease choose an option:", {
-            chat_id: chatId,
-            message_id: messageId,
-            reply_markup: mainMenuMarkup
-        });
-    }
-
-    else if (data === "login") {
-        userSessions[chatId] = { step: "waiting_username" };
-        bot.editMessageText("Please enter your **Username** in the game:", {
-            chat_id: chatId,
-            message_id: messageId,
-            parse_mode: "Markdown",
-            reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "main_menu" }]] }
-        });
-    } 
-
-    else if (data === "profile") {
-        if (!userSessions[chatId] || !userSessions[chatId].username) {
-            return bot.editMessageText("❌ You are not logged in. Please login first.", {
+        if (data === "main_menu") {
+            bot.editMessageText("Welcome to the Game Bot! 👋\n\nPlease choose an option:", {
                 chat_id: chatId,
                 message_id: messageId,
-                reply_markup: { inline_keyboard: [[{ text: "🔑 Login", callback_data: "login" }, { text: "🔙 Back", callback_data: "main_menu" }]] }
-            });
+                reply_markup: mainMenuMarkup
+            }).catch(() => {});
         }
-        showProfile(chatId, messageId);
-    }
 
-    else if (data === "buy_stars") {
-        if (!userSessions[chatId] || !userSessions[chatId].username) {
-            return bot.editMessageText("❌ Please login first to buy stars directly to your account.", {
+        else if (data === "login") {
+            userSessions[chatId] = { step: "waiting_username" };
+            bot.editMessageText("Please enter your **Username** in the game:", {
                 chat_id: chatId,
                 message_id: messageId,
-                reply_markup: { inline_keyboard: [[{ text: "🔑 Login", callback_data: "login" }, { text: "🔙 Back", callback_data: "main_menu" }]] }
-            });
+                parse_mode: "Markdown",
+                reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "main_menu" }]] }
+            }).catch(() => {});
+        } 
+
+        else if (data === "profile") {
+            if (!userSessions[chatId] || !userSessions[chatId].username) {
+                return bot.editMessageText("❌ You are not logged in. Please login first.", {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    reply_markup: { inline_keyboard: [[{ text: "🔑 Login", callback_data: "login" }, { text: "🔙 Back", callback_data: "main_menu" }]] }
+                }).catch(() => {});
+            }
+            showProfile(chatId, messageId);
         }
-        bot.editMessageText("Choose how many stars you want to buy:", {
-            chat_id: chatId,
-            message_id: messageId,
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "1 Stars ⭐", callback_data: "pay_1" }],
-                    [{ text: "50 Stars ⭐", callback_data: "pay_50" }],
-                    [{ text: "100 Stars ⭐", callback_data: "pay_100" }],
-                    [{ text: "🔙 Back", callback_data: "main_menu" }]
-                ]
+
+        else if (data === "buy_stars") {
+            if (!userSessions[chatId] || !userSessions[chatId].username) {
+                return bot.editMessageText("❌ Please login first to buy stars directly to your account.", {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    reply_markup: { inline_keyboard: [[{ text: "🔑 Login", callback_data: "login" }, { text: "🔙 Back", callback_data: "main_menu" }]] }
+                }).catch(() => {});
             }
-        });
-    }
-
-    else if (data.startsWith("pay_")) {
-        const amount = parseInt(data.split("_")[1]);
-        const username = userSessions[chatId].username;
-        
-        // We include the username in the payload to retrieve it later
-        bot.sendInvoice(
-            chatId,
-            `${amount} Stars`,
-            `Add ${amount} Stars directly to your account`,
-            `deposit_${amount}_${username}`,
-            "", 
-            "XTR",
-            [{ label: "Stars", amount: amount }]
-        );
-    }
-
-    else if (data.startsWith("redeem_")) {
-        const giftFileName = data.split("_")[1];
-        const username = userSessions[chatId].username;
-
-        try {
-            const userData = await firebaseREST("GET", `users/${username}`);
-            let gifts = userData.gifts;
-            let isDeleted = false;
-
-            if (Array.isArray(gifts)) {
-                const index = gifts.indexOf(giftFileName);
-                if (index !== -1) {
-                    gifts.splice(index, 1);
-                    await firebaseREST("PUT", `users/${username}/gifts`, gifts);
-                    isDeleted = true;
+            bot.editMessageText("Choose how many stars you want to buy:", {
+                chat_id: chatId,
+                message_id: messageId,
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "10 Stars ⭐", callback_data: "pay_10" }],
+                        [{ text: "50 Stars ⭐", callback_data: "pay_50" }],
+                        [{ text: "100 Stars ⭐", callback_data: "pay_100" }],
+                        [{ text: "🔙 Back", callback_data: "main_menu" }]
+                    ]
                 }
-            } else if (typeof gifts === 'object' && gifts !== null) {
-                const keys = Object.keys(gifts);
-                const keyToRemove = keys.find(key => gifts[key] === giftFileName);
-                if (keyToRemove) {
-                    await firebaseREST("DELETE", `users/${username}/gifts/${keyToRemove}`);
-                    isDeleted = true;
-                }
-            }
-
-            if (isDeleted) {
-                const giftName = giftFileName.replace(".png", "");
-                const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
-                const emoji = giftEmojis[giftName.toLowerCase()] || "🎁";
-                const cleanGiftName = giftName.replace(/[_*`[\]()]/g, "");
-
-                const successMsg = `**تم تحويل هديتك ${emoji} ${cleanGiftName} بنجاح** ✅\n\n` +
-                                   `يرجى التواصل مع @ST_Abdou وإعادة توجيه هذه الرسالة له لتحصل على هديتك.\n\n` +
-                                   `إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه الرسالة مرة أخرى.`;
-
-                try {
-                    await bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
-                } catch (msgError) {
-                    const plainMsg = successMsg.replace(/\*\*/g, "");
-                    await bot.sendMessage(chatId, plainMsg);
-                }
-                showProfile(chatId, messageId);
-            } else {
-                bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
-            }
-        } catch (e) {
-            bot.sendMessage(chatId, `❌ Error: ${e.message}`);
+            }).catch(() => {});
         }
+
+        else if (data.startsWith("pay_")) {
+            const amount = parseInt(data.split("_")[1]);
+            const username = userSessions[chatId].username;
+            
+            bot.sendInvoice(
+                chatId,
+                `${amount} Stars`,
+                `Add ${amount} Stars directly to your account`,
+                `deposit_${amount}_${username}`,
+                "", 
+                "XTR",
+                [{ label: "Stars", amount: amount * 100 }]
+            ).catch(err => bot.sendMessage(chatId, `❌ Invoice Error: ${err.message}`));
+        }
+
+        else if (data.startsWith("redeem_")) {
+            const giftFileName = data.split("_")[1];
+            const username = userSessions[chatId].username;
+
+            try {
+                const userData = await firebaseREST("GET", `users/${username}`);
+                let gifts = userData.gifts;
+                let isDeleted = false;
+
+                if (Array.isArray(gifts)) {
+                    const index = gifts.indexOf(giftFileName);
+                    if (index !== -1) {
+                        gifts.splice(index, 1);
+                        await firebaseREST("PUT", `users/${username}/gifts`, gifts);
+                        isDeleted = true;
+                    }
+                } else if (typeof gifts === 'object' && gifts !== null) {
+                    const keys = Object.keys(gifts);
+                    const keyToRemove = keys.find(key => gifts[key] === giftFileName);
+                    if (keyToRemove) {
+                        await firebaseREST("DELETE", `users/${username}/gifts/${keyToRemove}`);
+                        isDeleted = true;
+                    }
+                }
+
+                if (isDeleted) {
+                    const giftName = giftFileName.replace(".png", "");
+                    const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
+                    const emoji = giftEmojis[giftName.toLowerCase()] || "🎁";
+                    const cleanGiftName = giftName.replace(/[_*`[\]()]/g, "");
+
+                    const successMsg = `**تم تحويل هديتك ${emoji} ${cleanGiftName} بنجاح** ✅\n\n` +
+                                       `يرجى التواصل مع @ST_Abdou وإعادة توجيه هذه الرسالة له لتحصل على هديتك.\n\n` +
+                                       `إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه الرسالة مرة أخرى.`;
+
+                    bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" }).catch(() => {
+                        bot.sendMessage(chatId, successMsg.replace(/\*\*/g, ""));
+                    });
+                    showProfile(chatId, messageId);
+                } else {
+                    bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
+                }
+            } catch (e) {
+                bot.sendMessage(chatId, `❌ Redeem Error: ${e.message}`);
+            }
+        }
+    } catch (globalErr) {
+        console.error("Global Callback Error:", globalErr);
     }
 });
 
@@ -189,37 +207,41 @@ bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
 
-    if (!userSessions[chatId] || !userSessions[chatId].step || text.startsWith("/")) return;
+    if (!userSessions[chatId] || !userSessions[chatId].step || !text || text.startsWith("/")) return;
 
-    if (userSessions[chatId].step === "waiting_username") {
-        userSessions[chatId].tempUsername = text;
-        userSessions[chatId].step = "waiting_password";
-        bot.sendMessage(chatId, "Now enter your **Password**:", { parse_mode: "Markdown" });
-    } 
+    try {
+        if (userSessions[chatId].step === "waiting_username") {
+            userSessions[chatId].tempUsername = text;
+            userSessions[chatId].step = "waiting_password";
+            bot.sendMessage(chatId, "Now enter your **Password**:", { parse_mode: "Markdown" }).catch(() => {});
+        } 
 
-    else if (userSessions[chatId].step === "waiting_password") {
-        const username = userSessions[chatId].tempUsername;
-        const password = text;
+        else if (userSessions[chatId].step === "waiting_password") {
+            const username = userSessions[chatId].tempUsername;
+            const password = text;
 
-        try {
-            const userData = await firebaseREST("GET", `users/${username}`);
-            if (userData && userData.password === password) {
-                userSessions[chatId] = { username: username, step: "logged_in" };
-                bot.sendMessage(chatId, `✅ Welcome back, **${username}**! You are now logged in.`, { parse_mode: "Markdown" });
-                
-                const profileData = await getProfileText(username, userData);
-                bot.sendMessage(chatId, profileData.text, {
-                    parse_mode: "Markdown",
-                    reply_markup: profileData.markup
-                });
-            } else {
-                bot.sendMessage(chatId, "❌ Invalid Username or Password. Try again /start");
+            try {
+                const userData = await firebaseREST("GET", `users/${username}`);
+                if (userData && userData.password === password) {
+                    userSessions[chatId] = { username: username, step: "logged_in" };
+                    bot.sendMessage(chatId, `✅ Welcome back, **${username}**! You are now logged in.`, { parse_mode: "Markdown" }).catch(() => {});
+                    
+                    const profileData = await getProfileText(username, userData);
+                    bot.sendMessage(chatId, profileData.text, {
+                        parse_mode: "Markdown",
+                        reply_markup: profileData.markup
+                    }).catch(() => {});
+                } else {
+                    bot.sendMessage(chatId, "❌ Invalid Username or Password. Try again /start").catch(() => {});
+                    delete userSessions[chatId];
+                }
+            } catch (e) {
+                bot.sendMessage(chatId, "❌ Database Error during login.").catch(() => {});
                 delete userSessions[chatId];
             }
-        } catch (e) {
-            bot.sendMessage(chatId, "❌ Error connecting to database.");
-            delete userSessions[chatId];
         }
+    } catch (msgErr) {
+        console.error("Message handling error:", msgErr);
     }
 });
 
@@ -266,48 +288,47 @@ async function showProfile(chatId, messageId) {
             message_id: messageId,
             parse_mode: "Markdown",
             reply_markup: profileData.markup
-        });
+        }).catch(() => {});
     } catch (e) {
-        bot.sendMessage(chatId, "❌ Error loading profile.");
+        bot.sendMessage(chatId, "❌ Error loading profile.").catch(() => {});
     }
 }
 
 // Pre-checkout
-bot.on("pre_checkout_query", (q) => bot.answerPreCheckoutQuery(q.id, true));
+bot.on("pre_checkout_query", (q) => bot.answerPreCheckoutQuery(q.id, true).catch(() => {}));
 
+// Handle successful payment with crash-proof logic
 bot.on("successful_payment", async (msg) => {
     const chatId = msg.chat.id;
     const payload = msg.successful_payment.invoice_payload;
     
-    try {
-        const parts = payload.split("_");
-        const amount = parseInt(parts[1]);
-        const username = parts[2];
+    console.log("💰 Payment received, processing...");
 
-        if (!username) {
-            throw new Error("Could not find username in payment payload.");
+    // Process in a separate async block to prevent blocking the main loop
+    (async () => {
+        try {
+            const parts = payload.split("_");
+            const amount = parseInt(parts[1]);
+            const username = parts[2];
+
+            if (!username) throw new Error("No username in payload");
+
+            const userData = await firebaseREST("GET", `users/${username}`);
+            if (!userData) throw new Error(`User ${username} not found`);
+
+            const currentStars = userData.stars || 0;
+            const newStars = currentStars + amount;
+
+            await firebaseREST("PATCH", `users/${username}`, { stars: newStars });
+
+            bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account, **${username}**!`, { parse_mode: "Markdown" }).catch(() => {});
+            console.log(`✅ Stars added to ${username}`);
+            
+        } catch (e) {
+            console.error("❌ Payment processing error:", e.message);
+            bot.sendMessage(chatId, `❌ Payment Update Error: ${e.message}`).catch(() => {});
         }
-
-        // 1. Get current user data to get current stars
-        const userData = await firebaseREST("GET", `users/${username}`);
-        if (!userData) {
-            throw new Error(`User ${username} not found in database.`);
-        }
-
-        const currentStars = userData.stars || 0;
-        const newStars = currentStars + amount;
-
-        // 2. Update stars in database
-        await firebaseREST("PATCH", `users/${username}`, { stars: newStars });
-
-        // 3. Send success message
-        bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account, **${username}**!`, { parse_mode: "Markdown" });
-        
-    } catch (e) {
-        // Show the ACTUAL error message to the user for debugging
-        const errorDetail = e.message || "Unknown Error";
-        bot.sendMessage(chatId, `❌ Payment Error: ${errorDetail}\n\nPlease send this error to the developer.`);
-    }
+    })();
 });
 
-console.log("🤖 Account Bot is running with Payment Debugging...");
+console.log("🤖 Account Bot is running with Crash-Proof Logic...");
