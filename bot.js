@@ -108,7 +108,7 @@ bot.on("callback_query", async (query) => {
             message_id: messageId,
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: "1 Stars ⭐", callback_data: "pay_1" }],
+                    [{ text: "10 Stars ⭐", callback_data: "pay_10" }],
                     [{ text: "50 Stars ⭐", callback_data: "pay_50" }],
                     [{ text: "100 Stars ⭐", callback_data: "pay_100" }],
                     [{ text: "🔙 Back", callback_data: "main_menu" }]
@@ -119,14 +119,17 @@ bot.on("callback_query", async (query) => {
 
     else if (data.startsWith("pay_")) {
         const amount = parseInt(data.split("_")[1]);
+        const username = userSessions[chatId].username;
+        
+        // We include the username in the payload to retrieve it later
         bot.sendInvoice(
             chatId,
             `${amount} Stars`,
             `Add ${amount} Stars directly to your account`,
-            `deposit_${amount}`,
+            `deposit_${amount}_${username}`,
             "", 
             "XTR",
-            [{ label: "Stars", amount: amount }]
+            [{ label: "Stars", amount: amount * 100 }]
         );
     }
 
@@ -159,24 +162,18 @@ bot.on("callback_query", async (query) => {
                 const giftName = giftFileName.replace(".png", "");
                 const giftEmojis = { "rocket": "🚀", "rose": "🌹", "trophy": "🏆" };
                 const emoji = giftEmojis[giftName.toLowerCase()] || "🎁";
-
-                // Clean giftName to avoid Markdown issues
                 const cleanGiftName = giftName.replace(/[_*`[\]()]/g, "");
 
                 const successMsg = `**تم تحويل هديتك ${emoji} ${cleanGiftName} بنجاح** ✅\n\n` +
                                    `يرجى التواصل مع @ST_Abdou وإعادة توجيه هذه الرسالة له لتحصل على هديتك.\n\n` +
                                    `إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه الرسالة مرة أخرى.`;
 
-                // Try sending with Markdown, if fails, send as plain text
                 try {
                     await bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
                 } catch (msgError) {
-                    console.error("Markdown failed, sending plain text:", msgError.message);
                     const plainMsg = successMsg.replace(/\*\*/g, "");
                     await bot.sendMessage(chatId, plainMsg);
                 }
-                
-                // Refresh the profile view in the existing message
                 showProfile(chatId, messageId);
             } else {
                 bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
@@ -280,19 +277,23 @@ bot.on("pre_checkout_query", (q) => bot.answerPreCheckoutQuery(q.id, true));
 
 bot.on("successful_payment", async (msg) => {
     const chatId = msg.chat.id;
-    const amount = parseInt(msg.successful_payment.invoice_payload.split("_")[1]);
-    const username = userSessions[chatId] ? userSessions[chatId].username : null;
+    const payload = msg.successful_payment.invoice_payload;
+    const parts = payload.split("_");
+    const amount = parseInt(parts[1]);
+    const username = parts[2]; // Retrieve username from payload
 
     if (username) {
         try {
             const userData = await firebaseREST("GET", `users/${username}`);
             const currentStars = userData.stars || 0;
             await firebaseREST("PATCH", `users/${username}`, { stars: currentStars + amount });
-            bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account!`);
+            bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account, **${username}**!`, { parse_mode: "Markdown" });
         } catch (e) {
-            bot.sendMessage(chatId, "❌ Payment received but failed to update database.");
+            bot.sendMessage(chatId, "❌ Payment received but failed to update database. Please contact support.");
         }
+    } else {
+        bot.sendMessage(chatId, "❌ Error: Could not identify your account. Please contact support.");
     }
 });
 
-console.log("🤖 Account Bot is running with Stable UI & Logic...");
+console.log("🤖 Account Bot is running with Payment Fixed...");
