@@ -108,7 +108,7 @@ bot.on("callback_query", async (query) => {
             message_id: messageId,
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: "10 Stars ⭐", callback_data: "pay_10" }],
+                    [{ text: "1 Stars ⭐", callback_data: "pay_1" }],
                     [{ text: "50 Stars ⭐", callback_data: "pay_50" }],
                     [{ text: "100 Stars ⭐", callback_data: "pay_100" }],
                     [{ text: "🔙 Back", callback_data: "main_menu" }]
