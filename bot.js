@@ -126,7 +126,7 @@ bot.on("callback_query", async (query) => {
             `deposit_${amount}`,
             "", 
             "XTR",
-            [{ label: "Stars", amount: amount * 100 }]
+            [{ label: "Stars", amount: amount }]
         );
     }
 
