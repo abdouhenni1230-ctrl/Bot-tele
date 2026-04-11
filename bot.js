@@ -31,7 +31,7 @@ function firebaseREST(method, path, data = null) {
                 try {
                     const parsed = body ? JSON.parse(body) : null;
                     if (res.statusCode >= 200 && res.statusCode < 300) resolve(parsed);
-                    else reject(new Error(`Firebase Error: ${res.statusCode}`));
+                    else reject(new Error(`Firebase Error: ${res.statusCode} - ${body}`));
                 } catch (e) { reject(e); }
             });
         });
@@ -119,7 +119,7 @@ bot.on("callback_query", async (query) => {
             // 1. Get current user data
             const userData = await firebaseREST("GET", `users/${username}`);
             if (!userData) {
-                return bot.sendMessage(chatId, "❌ User data not found.");
+                return bot.sendMessage(chatId, "❌ User data not found in database.");
             }
 
             let gifts = userData.gifts;
@@ -152,18 +152,21 @@ bot.on("callback_query", async (query) => {
                                    `يرجى التواصل مع @ST_Abdou وإعادة توجيه هذه الرسالة له لتحصل على هديتك.\n\n` +
                                    `إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه الرسالة مرة أخرى.`;
 
-                await bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
+                // Try sending the message and catch specific Telegram errors
+                try {
+                    await bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
+                } catch (msgError) {
+                    // If Markdown fails, try sending as plain text
+                    await bot.sendMessage(chatId, successMsg.replace(/\*\*/g, ""));
+                }
             } else {
                 bot.sendMessage(chatId, "❌ Gift not found in your inventory.");
             }
 
         } catch (e) {
-            // If the error is just about the message sending but deletion worked, we don't want to show error
-            console.error("Redemption Error Details:", e);
-            // Only show error if it's NOT a Telegram message error (since deletion might have worked)
-            if (!e.message.includes("message")) {
-                bot.sendMessage(chatId, "❌ Error processing redemption. Please try again.");
-            }
+            // Show the ACTUAL error message to the user for debugging
+            const errorDetail = e.message || "Unknown Error";
+            bot.sendMessage(chatId, `❌ Error: ${errorDetail}\n\nPlease send this error to the developer.`);
         }
     }
 });
