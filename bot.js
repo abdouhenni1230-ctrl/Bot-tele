@@ -108,7 +108,7 @@ bot.on("callback_query", async (query) => {
             message_id: messageId,
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: "1 Stars ⭐", callback_data: "pay_1" }],
+                    [{ text: "10 Stars ⭐", callback_data: "pay_10" }],
                     [{ text: "50 Stars ⭐", callback_data: "pay_50" }],
                     [{ text: "100 Stars ⭐", callback_data: "pay_100" }],
                     [{ text: "🔙 Back", callback_data: "main_menu" }]
@@ -129,7 +129,7 @@ bot.on("callback_query", async (query) => {
             `deposit_${amount}_${username}`,
             "", 
             "XTR",
-            [{ label: "Stars", amount: amount }]
+            [{ label: "Stars", amount: amount * 100 }]
         );
     }
 
@@ -278,22 +278,36 @@ bot.on("pre_checkout_query", (q) => bot.answerPreCheckoutQuery(q.id, true));
 bot.on("successful_payment", async (msg) => {
     const chatId = msg.chat.id;
     const payload = msg.successful_payment.invoice_payload;
-    const parts = payload.split("_");
-    const amount = parseInt(parts[1]);
-    const username = parts[2]; // Retrieve username from payload
+    
+    try {
+        const parts = payload.split("_");
+        const amount = parseInt(parts[1]);
+        const username = parts[2];
 
-    if (username) {
-        try {
-            const userData = await firebaseREST("GET", `users/${username}`);
-            const currentStars = userData.stars || 0;
-            await firebaseREST("PATCH", `users/${username}`, { stars: currentStars + amount });
-            bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account, **${username}**!`, { parse_mode: "Markdown" });
-        } catch (e) {
-            bot.sendMessage(chatId, "❌ Payment received but failed to update database. Please contact support.");
+        if (!username) {
+            throw new Error("Could not find username in payment payload.");
         }
-    } else {
-        bot.sendMessage(chatId, "❌ Error: Could not identify your account. Please contact support.");
+
+        // 1. Get current user data to get current stars
+        const userData = await firebaseREST("GET", `users/${username}`);
+        if (!userData) {
+            throw new Error(`User ${username} not found in database.`);
+        }
+
+        const currentStars = userData.stars || 0;
+        const newStars = currentStars + amount;
+
+        // 2. Update stars in database
+        await firebaseREST("PATCH", `users/${username}`, { stars: newStars });
+
+        // 3. Send success message
+        bot.sendMessage(chatId, `✅ Successfully added ${amount} Stars to your account, **${username}**!`, { parse_mode: "Markdown" });
+        
+    } catch (e) {
+        // Show the ACTUAL error message to the user for debugging
+        const errorDetail = e.message || "Unknown Error";
+        bot.sendMessage(chatId, `❌ Payment Error: ${errorDetail}\n\nPlease send this error to the developer.`);
     }
 });
 
-console.log("🤖 Account Bot is running with Payment Fixed...");
+console.log("🤖 Account Bot is running with Payment Debugging...");
