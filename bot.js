@@ -40,7 +40,7 @@ function firebaseREST(method, path, data = null) {
         const options = {
             method: method,
             headers: { 'Content-Type': 'application/json' },
-            timeout: 15000 // Increased timeout for stability
+            timeout: 15000
         };
         const req = https.request(url, options, (res) => {
             let body = '';
@@ -127,7 +127,7 @@ bot.on("callback_query", async (query) => {
                 message_id: messageId,
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: "1 Stars ⭐", callback_data: "pay_1" }],
+                        [{ text: "10 Stars ⭐", callback_data: "pay_10" }],
                         [{ text: "50 Stars ⭐", callback_data: "pay_50" }],
                         [{ text: "100 Stars ⭐", callback_data: "pay_100" }],
                         [{ text: "🔙 Back", callback_data: "main_menu" }]
@@ -147,7 +147,7 @@ bot.on("callback_query", async (query) => {
                 `deposit_${amount}_${username}`,
                 "", 
                 "XTR",
-                [{ label: "Stars", amount: amount }]
+                [{ label: "Stars", amount: amount * 100 }]
             ).catch(err => bot.sendMessage(chatId, `❌ Invoice Error: ${err.message}`));
         }
 
@@ -182,7 +182,14 @@ bot.on("callback_query", async (query) => {
                     const emoji = giftEmojis[giftName.toLowerCase()] || "🎁";
                     const cleanGiftName = giftName.replace(/[_*`[\]()]/g, "");
 
+                    // Generate current date and time
+                    const now = new Date();
+                    const dateStr = now.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
+                    const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
                     const successMsg = `**تم تحويل هديتك ${emoji} ${cleanGiftName} بنجاح** ✅\n\n` +
+                                       `📅 **التاريخ:** ${dateStr}\n` +
+                                       `⏰ **الوقت:** ${timeStr}\n\n` +
                                        `يرجى التواصل مع @ST_Abdou وإعادة توجيه هذه الرسالة له لتحصل على هديتك.\n\n` +
                                        `إذا لم تتلقى رداً خلال 24 ساعة، يرجى إعادة توجيه الرسالة مرة أخرى.`;
 
@@ -304,7 +311,6 @@ bot.on("successful_payment", async (msg) => {
     
     console.log("💰 Payment received, processing...");
 
-    // Process in a separate async block to prevent blocking the main loop
     (async () => {
         try {
             const parts = payload.split("_");
@@ -331,4 +337,4 @@ bot.on("successful_payment", async (msg) => {
     })();
 });
 
-console.log("🤖 Account Bot is running with Crash-Proof Logic...");
+console.log("🤖 Account Bot is running with Time & Date added...");
